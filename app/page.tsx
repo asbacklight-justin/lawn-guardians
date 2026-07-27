@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type PlantKey =
   | "sunbud"
@@ -454,14 +454,17 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const stored = Number(window.localStorage.getItem("lawn-guardians-best") || 0);
-    setBestScore(stored);
+    const timer = window.setTimeout(() => {
+      setBestScore(
+        Number(window.localStorage.getItem("lawn-guardians-best") || 0),
+      );
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
     if (game.phase !== "won" && game.phase !== "lost") return;
     if (game.score > bestScore) {
-      setBestScore(game.score);
       window.localStorage.setItem("lawn-guardians-best", String(game.score));
     }
   }, [game.phase, game.score, bestScore]);
@@ -495,6 +498,7 @@ export default function Home() {
   const selectedPlant = selected && selected !== "shovel" ? PLANTS[selected] : null;
 
   const startGame = () => {
+    setBestScore((current) => Math.max(current, game.score));
     const next = freshGame();
     next.phase = "playing";
     setGame(next);
@@ -602,38 +606,34 @@ export default function Home() {
     window.setTimeout(() => tone(1180, 0.08, "sine"), 55);
   };
 
-  const cardList = useMemo(
-    () =>
-      PLANT_ORDER.map((key) => {
-        const def = PLANTS[key];
-        const cooldown = game.cooldowns[key];
-        const disabled = game.sun < def.cost || cooldown > 0;
-        return (
-          <button
-            className={`seed-card ${selected === key ? "selected" : ""} ${disabled ? "unavailable" : ""}`}
-            key={key}
-            onClick={() => chooseTool(key)}
-            aria-pressed={selected === key}
-            aria-label={`${def.name}，消耗 ${def.cost} 阳光。${def.description}`}
-            title={`${def.hotkey} · ${def.description}`}
-          >
-            <span className="card-hotkey">{def.hotkey}</span>
-            <span className="card-icon" aria-hidden="true">
-              {def.icon}
-            </span>
-            <span className="card-name">{def.name}</span>
-            <span className="card-cost">☀ {def.cost}</span>
-            {cooldown > 0 && (
-              <span
-                className="card-cooldown"
-                style={{ height: `${(cooldown / def.cooldown) * 100}%` }}
-              />
-            )}
-          </button>
-        );
-      }),
-    [game.cooldowns, game.sun, selected],
-  );
+  const cardList = PLANT_ORDER.map((key) => {
+    const def = PLANTS[key];
+    const cooldown = game.cooldowns[key];
+    const disabled = game.sun < def.cost || cooldown > 0;
+    return (
+      <button
+        className={`seed-card ${selected === key ? "selected" : ""} ${disabled ? "unavailable" : ""}`}
+        key={key}
+        onClick={() => chooseTool(key)}
+        aria-pressed={selected === key}
+        aria-label={`${def.name}，消耗 ${def.cost} 阳光。${def.description}`}
+        title={`${def.hotkey} · ${def.description}`}
+      >
+        <span className="card-hotkey">{def.hotkey}</span>
+        <span className="card-icon" aria-hidden="true">
+          {def.icon}
+        </span>
+        <span className="card-name">{def.name}</span>
+        <span className="card-cost">☀ {def.cost}</span>
+        {cooldown > 0 && (
+          <span
+            className="card-cooldown"
+            style={{ height: `${(cooldown / def.cooldown) * 100}%` }}
+          />
+        )}
+      </button>
+    );
+  });
 
   return (
     <main className="game-shell">

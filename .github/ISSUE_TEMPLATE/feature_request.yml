@@ -1,0 +1,26 @@
+name: 功能建议
+description: 建议新玩法、植物、敌人或体验改进
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 想解决的问题
+      description: 请先说明需求，而不只是实现方案。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+    validations:
+      required: true
+  - type: textarea
+    id: balance
+    attributes:
+      label: 对玩法和平衡的影响
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 考虑过的替代方案

@@ -1,0 +1,48 @@
+name: 缺陷报告
+description: 报告可复现的游戏或界面问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: 感谢你帮助改进《草坪守卫战》。
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题描述
+      description: 清楚说明发生了什么。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开……
+        2. 选择……
+        3. 点击……
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: 浏览器与版本
+      placeholder: Edge 130 / Chrome 130 / Safari 18
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: 操作系统与设备
+      placeholder: Windows 11 / iPhone 15
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 截图或控制台信息
+      description: 请删除其中的令牌、Cookie 和个人信息。
