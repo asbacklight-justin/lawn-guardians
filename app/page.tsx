@@ -8,9 +8,11 @@ type PlantKey =
   | "twinvine"
   | "wallroot"
   | "frostfern"
-  | "blastberry";
+  | "blastberry"
+  | "mooncap";
 type Tool = PlantKey | "shovel" | null;
 type Phase = "ready" | "playing" | "won" | "lost";
+type LevelId = 1 | 2;
 
 type Plant = {
   id: number;
@@ -38,11 +40,15 @@ type Bullet = {
   x: number;
   damage: number;
   slow: boolean;
-  variant: "seed" | "twin" | "frost";
+  pierce: number;
+  hitIds: number[];
+  variant: "seed" | "twin" | "frost" | "moon";
 };
 type Sun = { id: number; x: number; y: number; ttl: number };
 type Burst = { id: number; row: number; x: number; ttl: number };
+type Tombstone = { id: number; row: number; col: number };
 type GameState = {
+  level: LevelId;
   phase: Phase;
   paused: boolean;
   speed: 1 | 2;
@@ -53,6 +59,7 @@ type GameState = {
   bullets: Bullet[];
   suns: Sun[];
   bursts: Burst[];
+  tombstones: Tombstone[];
   mowers: boolean[];
   cooldowns: Record<PlantKey, number>;
   elapsed: number;
@@ -64,9 +71,52 @@ type GameState = {
 
 const ROWS = 5;
 const COLS = 9;
-const TOTAL_ENEMIES = 30;
 let entityId = 1;
 const uid = () => entityId++;
+
+const LEVELS: Record<
+  LevelId,
+  {
+    name: string;
+    kicker: string;
+    description: string;
+    waves: number;
+    totalEnemies: number;
+    initialSun: number;
+    skySunBase: number;
+    skySunJitter: number;
+    graves: Array<[number, number]>;
+  }
+> = {
+  1: {
+    name: "夕照前院",
+    kicker: "第一关 · 熟悉防线",
+    description: "三波入侵者将从夕阳下靠近。阳光充足，适合熟悉植物搭配。",
+    waves: 3,
+    totalEnemies: 30,
+    initialSun: 150,
+    skySunBase: 5.7,
+    skySunJitter: 1.4,
+    graves: [],
+  },
+  2: {
+    name: "月雾墓园",
+    kicker: "第二关 · 月夜挑战",
+    description: "墓碑占据五个草格，自然阳光变慢；守住四波敌人并善用月芒菇。",
+    waves: 4,
+    totalEnemies: 40,
+    initialSun: 175,
+    skySunBase: 7.2,
+    skySunJitter: 1.8,
+    graves: [
+      [0, 5],
+      [1, 3],
+      [2, 6],
+      [3, 4],
+      [4, 5],
+    ],
+  },
+};
 
 const PLANTS: Record<
   PlantKey,
@@ -148,21 +198,38 @@ const PLANTS: Record<
     description: "瞬间炸伤附近一整片敌人",
     hotkey: "6",
   },
+  mooncap: {
+    name: "月芒菇",
+    icon: "🍄",
+    cost: 125,
+    cooldown: 8,
+    hp: 190,
+    interval: 1.85,
+    damage: 22,
+    description: "月光孢子最多穿透三名敌人",
+    hotkey: "7",
+  },
 };
 
 const PLANT_ORDER = Object.keys(PLANTS) as PlantKey[];
 
-const freshGame = (): GameState => ({
+const freshGame = (level: LevelId = 1): GameState => ({
+  level,
   phase: "ready",
   paused: false,
   speed: 1,
-  sun: 150,
+  sun: LEVELS[level].initialSun,
   score: 0,
   plants: [],
   zombies: [],
   bullets: [],
   suns: [],
   bursts: [],
+  tombstones: LEVELS[level].graves.map(([row, col]) => ({
+    id: uid(),
+    row,
+    col,
+  })),
   mowers: Array(ROWS).fill(true),
   cooldowns: {
     sunbud: 0,
@@ -171,6 +238,7 @@ const freshGame = (): GameState => ({
     wallroot: 0,
     frostfern: 0,
     blastberry: 0,
+    mooncap: 0,
   },
   elapsed: 0,
   nextSpawnAt: 4,
@@ -179,11 +247,17 @@ const freshGame = (): GameState => ({
   kills: 0,
 });
 
-function spawnZombie(spawned: number): Zombie {
+function spawnZombie(spawned: number, level: LevelId): Zombie {
   const wave = Math.floor(spawned / 10) + 1;
   const roll = Math.random();
   const kind =
-    wave === 1
+    level === 2 && wave >= 4
+      ? roll < 0.18
+        ? "wanderer"
+        : roll < 0.52
+          ? "pothead"
+          : "ironhead"
+      : wave === 1
       ? roll < 0.82
         ? "wanderer"
         : "pothead"
@@ -203,13 +277,16 @@ function spawnZombie(spawned: number): Zombie {
     pothead: { hp: 410, speed: 0.15, damage: 64 },
     ironhead: { hp: 720, speed: 0.115, damage: 72 },
   }[kind];
+  const levelMultiplier = level === 2 ? 1.08 : 1;
   return {
     id: uid(),
     kind,
     row: Math.floor(Math.random() * ROWS),
     x: 9.35 + Math.random() * 0.35,
-    ...stats,
-    maxHp: stats.hp,
+    hp: Math.round(stats.hp * levelMultiplier),
+    speed: stats.speed * levelMultiplier,
+    damage: Math.round(stats.damage * levelMultiplier),
+    maxHp: Math.round(stats.hp * levelMultiplier),
     slowFor: 0,
   };
 }
@@ -217,6 +294,7 @@ function spawnZombie(spawned: number): Zombie {
 function stepGame(previous: GameState, dt: number): GameState {
   if (previous.phase !== "playing" || previous.paused) return previous;
 
+  const level = LEVELS[previous.level];
   const g: GameState = {
     ...previous,
     elapsed: previous.elapsed + dt,
@@ -240,16 +318,20 @@ function stepGame(previous: GameState, dt: number): GameState {
       y: 0.55 + Math.random() * 3.9,
       ttl: 10,
     });
-    g.nextSunAt = g.elapsed + 5.7 + Math.random() * 1.4;
+    g.nextSunAt =
+      g.elapsed + level.skySunBase + Math.random() * level.skySunJitter;
   }
   g.suns = g.suns.filter((sun) => sun.ttl > 0);
   g.bursts = g.bursts.filter((burst) => burst.ttl > 0);
 
-  if (g.spawned < TOTAL_ENEMIES && g.elapsed >= g.nextSpawnAt) {
-    g.zombies.push(spawnZombie(g.spawned));
+  if (g.spawned < level.totalEnemies && g.elapsed >= g.nextSpawnAt) {
+    g.zombies.push(spawnZombie(g.spawned, g.level));
     g.spawned += 1;
     const wave = Math.floor((g.spawned - 1) / 10) + 1;
-    const gap = Math.max(1.7, 4.35 - wave * 0.72);
+    const gap = Math.max(
+      g.level === 2 ? 1.45 : 1.7,
+      (g.level === 2 ? 4.05 : 4.35) - wave * 0.72,
+    );
     g.nextSpawnAt = g.elapsed + gap * (0.78 + Math.random() * 0.48);
   }
 
@@ -280,6 +362,8 @@ function stepGame(previous: GameState, dt: number): GameState {
     const variant =
       plant.type === "frostfern"
         ? "frost"
+        : plant.type === "mooncap"
+          ? "moon"
         : plant.type === "twinvine"
           ? "twin"
           : "seed";
@@ -289,6 +373,8 @@ function stepGame(previous: GameState, dt: number): GameState {
       x: plant.col + 0.72,
       damage: def.damage,
       slow: plant.type === "frostfern",
+      pierce: plant.type === "mooncap" ? 3 : 1,
+      hitIds: [],
       variant,
     });
     if (plant.type === "twinvine") {
@@ -298,6 +384,8 @@ function stepGame(previous: GameState, dt: number): GameState {
         x: plant.col + 0.42,
         damage: def.damage,
         slow: false,
+        pierce: 1,
+        hitIds: [],
         variant: "twin",
       });
     }
@@ -312,6 +400,7 @@ function stepGame(previous: GameState, dt: number): GameState {
         (zombie) =>
           zombie.row === bullet.row &&
           zombie.hp > 0 &&
+          !bullet.hitIds.includes(zombie.id) &&
           zombie.x >= bullet.x - 0.1 &&
           zombie.x <= nextX + 0.35,
       )
@@ -319,6 +408,14 @@ function stepGame(previous: GameState, dt: number): GameState {
     if (hit) {
       hit.hp -= bullet.damage;
       if (bullet.slow) hit.slowFor = 3.2;
+      if (bullet.pierce > 1 && nextX < 9.7) {
+        survivingBullets.push({
+          ...bullet,
+          x: nextX,
+          pierce: bullet.pierce - 1,
+          hitIds: [...bullet.hitIds, hit.id],
+        });
+      }
     } else if (nextX < 9.7) {
       survivingBullets.push({ ...bullet, x: nextX });
     }
@@ -378,10 +475,13 @@ function stepGame(previous: GameState, dt: number): GameState {
     }
   }
 
-  if (g.spawned >= TOTAL_ENEMIES && g.zombies.length === 0) {
+  if (g.spawned >= level.totalEnemies && g.zombies.length === 0) {
     g.phase = "won";
     g.paused = false;
-    g.score += Math.max(0, Math.round(2500 - g.elapsed * 12));
+    g.score += Math.max(
+      0,
+      Math.round((g.level === 2 ? 3800 : 2500) - g.elapsed * 12),
+    );
   }
   return g;
 }
@@ -409,12 +509,15 @@ function ZombieSprite({ kind }: { kind: Zombie["kind"] }) {
 }
 
 export default function Home() {
-  const [game, setGame] = useState<GameState>(() => freshGame());
+  const [game, setGame] = useState<GameState>(() => freshGame(1));
+  const [selectedLevel, setSelectedLevel] = useState<LevelId>(1);
   const [selected, setSelected] = useState<Tool>(null);
   const [muted, setMuted] = useState(false);
   const [toast, setToast] = useState("");
   const [bestScore, setBestScore] = useState(0);
   const audioRef = useRef<AudioContext | null>(null);
+  const gameRef = useRef(game);
+  const collectionTimers = useRef<number[]>([]);
 
   const tone = useCallback(
     (frequency: number, duration = 0.08, type: OscillatorType = "sine") => {
@@ -446,12 +549,57 @@ export default function Home() {
     [muted],
   );
 
+  const collectSun = useCallback(
+    (id: number) => {
+      setGame((current) => {
+        if (!current.suns.some((sun) => sun.id === id)) return current;
+        return {
+          ...current,
+          sun: current.sun + 25,
+          score: current.score + 10,
+          suns: current.suns.filter((sun) => sun.id !== id),
+        };
+      });
+      tone(880, 0.09, "sine");
+      window.setTimeout(() => tone(1180, 0.08, "sine"), 55);
+    },
+    [tone],
+  );
+
+  const collectAllSuns = useCallback(() => {
+    const current = gameRef.current;
+    if (current.phase !== "playing" || current.paused) return;
+    const ids = [...current.suns]
+      .sort((a, b) => a.id - b.id)
+      .map((sun) => sun.id);
+    if (!ids.length) {
+      setToast("场上暂无可收集的阳光");
+      return;
+    }
+    collectionTimers.current.forEach((timer) => window.clearTimeout(timer));
+    collectionTimers.current = ids.map((id, index) =>
+      window.setTimeout(() => collectSun(id), index * 110),
+    );
+    setToast(`自动收集 ${ids.length} 份阳光`);
+  }, [collectSun]);
+
+  useEffect(() => {
+    gameRef.current = game;
+  }, [game]);
+
   useEffect(() => {
     const timer = window.setInterval(() => {
       setGame((current) => stepGame(current, 0.05 * current.speed));
     }, 50);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(
+    () => () => {
+      collectionTimers.current.forEach((timer) => window.clearTimeout(timer));
+    },
+    [],
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -477,9 +625,13 @@ export default function Home() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key >= "1" && event.key <= "6") {
-        setSelected(PLANT_ORDER[Number(event.key) - 1]);
+      if (event.key >= "1" && event.key <= "7") {
+        const plant = PLANT_ORDER[Number(event.key) - 1];
+        if (plant && (plant !== "mooncap" || game.level === 2)) {
+          setSelected(plant);
+        }
       }
+      if (event.key.toLowerCase() === "a") collectAllSuns();
       if (event.key === "Escape") setSelected(null);
       if (event.code === "Space" && game.phase === "playing") {
         event.preventDefault();
@@ -488,22 +640,28 @@ export default function Home() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [game.phase]);
+  }, [collectAllSuns, game.level, game.phase]);
 
-  const wave = Math.min(3, Math.floor(game.spawned / 10) + 1);
+  const level = LEVELS[game.level];
+  const wave = Math.min(level.waves, Math.floor(game.spawned / 10) + 1);
   const progress = Math.min(
     100,
-    ((game.spawned + game.kills * 0.15) / TOTAL_ENEMIES) * 100,
+    ((game.spawned + game.kills * 0.15) / level.totalEnemies) * 100,
   );
   const selectedPlant = selected && selected !== "shovel" ? PLANTS[selected] : null;
 
-  const startGame = () => {
+  const startGame = (levelId: LevelId = selectedLevel) => {
+    collectionTimers.current.forEach((timer) => window.clearTimeout(timer));
+    collectionTimers.current = [];
     setBestScore((current) => Math.max(current, game.score));
-    const next = freshGame();
+    const next = freshGame(levelId);
     next.phase = "playing";
     setGame(next);
+    setSelectedLevel(levelId);
     setSelected(null);
-    setToast("第一波正在靠近……");
+    setToast(
+      levelId === 2 ? "月雾升起，第一波正在靠近……" : "第一波正在靠近……",
+    );
     tone(440, 0.12);
     window.setTimeout(() => tone(660, 0.16), 90);
   };
@@ -522,6 +680,9 @@ export default function Home() {
     const occupied = game.plants.find(
       (plant) => plant.row === row && plant.col === col,
     );
+    const blocked = game.tombstones.some(
+      (tombstone) => tombstone.row === row && tombstone.col === col,
+    );
     if (selected === "shovel") {
       if (!occupied) {
         setToast("这里没有植物");
@@ -535,6 +696,10 @@ export default function Home() {
       return;
     }
     const def = PLANTS[selected];
+    if (blocked) {
+      setToast("墓碑占据了这个草格");
+      return;
+    }
     if (occupied) {
       setToast("这个位置已经种有植物");
       return;
@@ -554,6 +719,9 @@ export default function Home() {
       if (
         current.sun < def.cost ||
         current.cooldowns[type] > 0 ||
+        current.tombstones.some(
+          (tombstone) => tombstone.row === row && tombstone.col === col,
+        ) ||
         current.plants.some((plant) => plant.row === row && plant.col === col)
       )
         return current;
@@ -592,21 +760,10 @@ export default function Home() {
     });
   };
 
-  const collectSun = (id: number) => {
-    setGame((current) => {
-      if (!current.suns.some((sun) => sun.id === id)) return current;
-      return {
-        ...current,
-        sun: current.sun + 25,
-        score: current.score + 10,
-        suns: current.suns.filter((sun) => sun.id !== id),
-      };
-    });
-    tone(880, 0.09, "sine");
-    window.setTimeout(() => tone(1180, 0.08, "sine"), 55);
-  };
-
-  const cardList = PLANT_ORDER.map((key) => {
+  const availablePlants = PLANT_ORDER.filter(
+    (key) => key !== "mooncap" || game.level === 2,
+  );
+  const cardList = availablePlants.map((key) => {
     const def = PLANTS[key];
     const cooldown = game.cooldowns[key];
     const disabled = game.sun < def.cost || cooldown > 0;
@@ -634,9 +791,10 @@ export default function Home() {
       </button>
     );
   });
+  const previewLevel = LEVELS[selectedLevel];
 
   return (
-    <main className="game-shell">
+    <main className={`game-shell level-${game.phase === "ready" ? selectedLevel : game.level}`}>
       <header className="topbar">
         <div className="brand">
           <span className="brand-leaf">✦</span>
@@ -647,13 +805,19 @@ export default function Home() {
         </div>
         <div className="wave-meter" aria-label={`第 ${wave} 波`}>
           <div className="wave-copy">
-            <span>第 {wave} 波 / 3</span>
+            <span>
+              {level.name} · 第 {wave} 波 / {level.waves}
+            </span>
             <span>{game.kills} 击退</span>
           </div>
           <div className="meter-track">
             <span style={{ width: `${progress}%` }} />
-            <i style={{ left: "33.33%" }} />
-            <i style={{ left: "66.66%" }} />
+            {Array.from({ length: level.waves - 1 }, (_, index) => (
+              <i
+                key={index}
+                style={{ left: `${((index + 1) / level.waves) * 100}%` }}
+              />
+            ))}
           </div>
         </div>
         <div className="top-actions">
@@ -694,6 +858,15 @@ export default function Home() {
           <span className="sun-orb">☀</span>
           <strong>{game.sun}</strong>
           <small>阳光</small>
+          <button
+            className="collect-all-button"
+            onClick={collectAllSuns}
+            disabled={!game.suns.length || game.paused || game.phase !== "playing"}
+            aria-label="按生成顺序自动收集场上全部阳光，快捷键 A"
+            title="快捷键 A · 自动依次收集当前阳光"
+          >
+            A · 全收
+          </button>
         </div>
         <div className="seed-scroll">{cardList}</div>
         <button
@@ -724,21 +897,43 @@ export default function Home() {
                 </span>
               ))}
             </aside>
-            <div className="lawn-stage">
+            <div className={`lawn-stage ${game.level === 2 ? "night-stage" : ""}`}>
               <div className="lawn-grid">
                 {Array.from({ length: ROWS * COLS }, (_, index) => {
                   const row = Math.floor(index / COLS);
                   const col = index % COLS;
+                  const isBlocked = game.tombstones.some(
+                    (tombstone) =>
+                      tombstone.row === row && tombstone.col === col,
+                  );
                   return (
                     <button
                       key={`${row}-${col}`}
-                      className={`lawn-cell ${selectedPlant ? "plantable" : ""}`}
+                      className={`lawn-cell ${selectedPlant ? "plantable" : ""} ${isBlocked ? "tombstone-cell" : ""}`}
                       onClick={() => placeAt(row, col)}
-                      aria-label={`第 ${row + 1} 行，第 ${col + 1} 列`}
+                      aria-label={
+                        isBlocked
+                          ? `第 ${row + 1} 行，第 ${col + 1} 列，墓碑占据`
+                          : `第 ${row + 1} 行，第 ${col + 1} 列`
+                      }
                     />
                   );
                 })}
               </div>
+
+              {game.tombstones.map((tombstone) => (
+                <span
+                  key={tombstone.id}
+                  className="tombstone"
+                  style={{
+                    left: `${((tombstone.col + 0.5) / COLS) * 100}%`,
+                    top: `${((tombstone.row + 0.5) / ROWS) * 100}%`,
+                  }}
+                  aria-hidden="true"
+                >
+                  <i>✦</i>
+                </span>
+              ))}
 
               {game.plants.map((plant) => (
                 <button
@@ -829,7 +1024,7 @@ export default function Home() {
             ? "点击草坪上的植物将其铲除"
             : selectedPlant
               ? `已选择 ${selectedPlant.name} · 点击空草格种植`
-              : "按 1–6 选植物 · 空格暂停 · Esc 取消选择"}
+              : `按 1–${game.level === 2 ? "7" : "6"} 选植物 · A 自动收集阳光 · 空格暂停`}
         </span>
         <span>最高分 {Math.max(bestScore, game.score)}</span>
       </footer>
@@ -841,23 +1036,43 @@ export default function Home() {
           <div className="intro-art" />
           <div className="intro-vignette" />
           <div className="intro-panel">
-            <span className="eyebrow">原创网页塔防游戏</span>
+            <span className="eyebrow">{previewLevel.kicker}</span>
             <h1>
               草坪
               <br />
               守卫战
             </h1>
-            <p>
-              收集阳光，布置植物防线，在三波越来越强的夜行入侵者面前守住五条草坪。
-            </p>
-            <button className="primary-button" onClick={startGame}>
-              <span>开始守卫</span>
+            <p>{previewLevel.description}</p>
+            <div className="level-picker" role="radiogroup" aria-label="选择关卡">
+              <button
+                className={`level-card ${selectedLevel === 1 ? "active" : ""}`}
+                onClick={() => setSelectedLevel(1)}
+                role="radio"
+                aria-checked={selectedLevel === 1}
+              >
+                <small>LEVEL 01</small>
+                <strong>夕照前院</strong>
+                <span>3 波 · 经典草坪</span>
+              </button>
+              <button
+                className={`level-card night ${selectedLevel === 2 ? "active" : ""}`}
+                onClick={() => setSelectedLevel(2)}
+                role="radio"
+                aria-checked={selectedLevel === 2}
+              >
+                <small>LEVEL 02</small>
+                <strong>月雾墓园</strong>
+                <span>4 波 · 新植物 月芒菇 🍄</span>
+              </button>
+            </div>
+            <button className="primary-button" onClick={() => startGame()}>
+              <span>开始 {previewLevel.name}</span>
               <b>▶</b>
             </button>
             <div className="intro-tips">
-              <span>☀ 点击收集阳光</span>
+              <span>☀ 按 A 自动收集阳光</span>
               <span>🌿 选择卡片后种植</span>
-              <span>🏁 击退全部 3 波</span>
+              <span>🏁 击退全部 {previewLevel.waves} 波</span>
             </div>
           </div>
         </section>
@@ -890,7 +1105,13 @@ export default function Home() {
             <span className="eyebrow">
               {game.phase === "won" ? "花园守住了！" : "防线被突破"}
             </span>
-            <h2>{game.phase === "won" ? "黎明到来" : "再试一次"}</h2>
+            <h2>
+              {game.phase === "won"
+                ? game.level === 2
+                  ? "月雾退散"
+                  : "黎明到来"
+                : "再试一次"}
+            </h2>
             <div className="result-stats">
               <div>
                 <strong>{game.score}</strong>
@@ -905,9 +1126,22 @@ export default function Home() {
                 <small>坚持时间</small>
               </div>
             </div>
-            <button className="primary-button compact" onClick={startGame}>
-              再来一局
-            </button>
+            <div className="result-actions">
+              {game.phase === "won" && game.level === 1 && (
+                <button
+                  className="primary-button compact"
+                  onClick={() => startGame(2)}
+                >
+                  进入第二关
+                </button>
+              )}
+              <button
+                className="secondary-button"
+                onClick={() => startGame(game.level)}
+              >
+                重玩本关
+              </button>
+            </div>
           </div>
         </section>
       )}
