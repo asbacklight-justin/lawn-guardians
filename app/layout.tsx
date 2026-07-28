@@ -12,10 +12,10 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase,
     title: "草坪守卫战 · Lawn Guardians",
     description:
-      "收集阳光、布置原创植物防线，在三波夜行入侵者面前守住五条草坪。",
+      "收集阳光、布置七种原创植物防线，挑战夕照前院与月雾墓园两道关卡。",
     openGraph: {
       title: "草坪守卫战 · Lawn Guardians",
-      description: "一款原创、可直接在浏览器游玩的五路植物塔防游戏。",
+      description: "两个关卡、七种植物，一款可直接在浏览器游玩的原创五路植物塔防游戏。",
       images: [{ url: new URL("/og.png", metadataBase).toString(), width: 1536, height: 1024 }],
       type: "website",
     },

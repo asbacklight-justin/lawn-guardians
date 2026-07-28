@@ -31,8 +31,11 @@ test("server-renders the Lawn Guardians game shell", async () => {
   assert.match(html, /<html[^>]*lang="zh-CN"/i);
   assert.match(html, /草坪守卫战/);
   assert.match(html, /LAWN GUARDIANS/);
-  assert.match(html, /开始守卫/);
-  assert.match(html, /原创网页塔防游戏/);
+  assert.match(html, /开始/);
+  assert.match(html, /第一关 · 熟悉防线/);
+  assert.match(html, /月雾墓园/);
+  assert.match(html, /月芒菇/);
+  assert.match(html, /自动收集场上全部阳光/);
   assert.match(html, /og\.png/);
   assert.doesNotMatch(html, /codex-preview/i);
   assert.doesNotMatch(html, /react-loading-skeleton/i);

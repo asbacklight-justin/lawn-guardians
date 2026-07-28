@@ -207,14 +207,15 @@ button:focus-visible {
 }
 
 .sun-bank {
+  position: relative;
   width: 88px;
   min-width: 88px;
-  height: 74px;
+  height: 78px;
   display: grid;
   grid-template-columns: 35px 1fr;
   grid-template-rows: 1fr 1fr;
   align-items: center;
-  padding: 7px;
+  padding: 5px 7px 22px;
   border: 2px solid #583717;
   border-radius: 13px;
   background: linear-gradient(145deg, #fff7be, #e6c558);
@@ -240,6 +241,32 @@ button:focus-visible {
   align-self: start;
   color: #806929;
   font-size: 10px;
+}
+
+.collect-all-button {
+  position: absolute;
+  right: 5px;
+  bottom: 4px;
+  left: 5px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid #8b681d;
+  border-radius: 5px;
+  background: #513d18;
+  color: #fff1a8;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.collect-all-button:hover:not(:disabled) {
+  background: #74531b;
+}
+
+.collect-all-button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .seed-scroll {
@@ -501,6 +528,28 @@ button:focus-visible {
     repeating-linear-gradient(90deg, transparent 0 11%, #365f3230 11% 11.25%);
 }
 
+.night-stage {
+  background:
+    linear-gradient(90deg, transparent 88%, #192c355e),
+    repeating-linear-gradient(0deg, #547a58 0 10%, #456d53 10% 20%);
+}
+
+.night-stage::before {
+  background:
+    radial-gradient(circle at 18% 12%, #dceeff55 0 3%, transparent 19%),
+    radial-gradient(ellipse at 55% 70%, #a8c6b025, transparent 42%),
+    repeating-linear-gradient(90deg, transparent 0 11%, #1e393830 11% 11.25%);
+}
+
+.level-2 .house-zone {
+  filter: saturate(0.68) brightness(0.72) hue-rotate(18deg);
+}
+
+.level-2 .right-fog {
+  width: 17%;
+  background: linear-gradient(90deg, transparent, #1a2b3bd1);
+}
+
 .lawn-grid {
   position: absolute;
   inset: 0;
@@ -526,6 +575,52 @@ button:focus-visible {
 .lawn-cell.plantable:hover {
   background: #efff9f48;
   box-shadow: inset 0 0 0 3px #f0ffb585;
+}
+
+.lawn-cell.tombstone-cell,
+.lawn-cell.tombstone-cell:hover {
+  background: #1f2e2938;
+  box-shadow: inset 0 0 0 2px #24393252;
+  cursor: not-allowed;
+}
+
+.tombstone {
+  position: absolute;
+  z-index: 4;
+  width: 6.2%;
+  height: 13%;
+  transform: translate(-50%, -42%) rotate(-2deg);
+  display: grid;
+  place-items: center;
+  border: 3px solid #283331;
+  border-radius: 45% 45% 8px 8px;
+  background:
+    linear-gradient(100deg, transparent 48%, #d6d6c623 49% 53%, transparent 54%),
+    linear-gradient(145deg, #87918a, #4d5b56);
+  color: #cfd7c6;
+  box-shadow:
+    inset -5px -7px 0 #34423e,
+    0 7px 0 #263d32,
+    0 11px 9px #15201a88;
+  font-size: clamp(12px, 1.4vw, 20px);
+  pointer-events: none;
+}
+
+.tombstone::after {
+  content: "";
+  position: absolute;
+  right: -18%;
+  bottom: -23%;
+  left: -18%;
+  height: 27%;
+  border-radius: 50%;
+  background: #263d32;
+  box-shadow: 0 -3px 0 #6d7a62;
+}
+
+.tombstone i {
+  font-style: normal;
+  text-shadow: 0 2px #34413c;
 }
 
 .plant-unit,
@@ -584,6 +679,16 @@ button:focus-visible {
 .plant-frostfern .plant-glow {
   background: #d8ffffaa;
   box-shadow: 0 0 18px #d8ffff;
+}
+
+.plant-mooncap .plant-glow {
+  background: #b9a7ff9c;
+  box-shadow: 0 0 22px #ab91ff;
+}
+
+.plant-mooncap .plant-emoji {
+  filter: hue-rotate(28deg) saturate(1.25)
+    drop-shadow(0 0 7px #c1abff);
 }
 
 .plant-wallroot .plant-emoji {
@@ -734,6 +839,17 @@ button:focus-visible {
   box-shadow: 0 0 9px #c6f5ff;
 }
 
+.bullet-moon {
+  width: clamp(15px, 1.8vw, 24px);
+  aspect-ratio: 1.55;
+  border-color: #d4c7ff;
+  border-radius: 70% 30% 70% 30%;
+  background: radial-gradient(ellipse, #fff 0 12%, #cebaff 28%, #785bc5 66%);
+  box-shadow:
+    0 0 11px #d8caff,
+    -7px 0 12px #9c7de6;
+}
+
 .sun-token {
   z-index: 10;
   width: clamp(38px, 4.2vw, 58px);
@@ -881,6 +997,65 @@ button:focus-visible {
   line-height: 1.8;
 }
 
+.level-picker {
+  width: min(460px, 100%);
+  margin: -6px 0 18px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.level-card {
+  padding: 10px 12px;
+  display: grid;
+  gap: 2px;
+  border: 2px solid #a8bf8299;
+  border-radius: 12px;
+  background: #142219cf;
+  color: #eaf0d9;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 #ffffff21;
+  transition: transform 0.16s, border-color 0.16s, background 0.16s;
+}
+
+.level-card:hover {
+  transform: translateY(-2px);
+  border-color: #e4ecac;
+}
+
+.level-card.active {
+  border-color: #ffe577;
+  background: #35542ddd;
+  box-shadow:
+    inset 0 1px 0 #ffffff36,
+    0 0 0 2px #ffd34b47;
+}
+
+.level-card.night.active {
+  border-color: #c8b7ff;
+  background: #313250e8;
+  box-shadow:
+    inset 0 1px 0 #ffffff36,
+    0 0 0 2px #a990ff47;
+}
+
+.level-card small {
+  color: #d8c56f;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.13em;
+}
+
+.level-card strong {
+  font-size: 14px;
+}
+
+.level-card span {
+  color: #b8c5ad;
+  font-size: 9px;
+}
+
 .primary-button {
   min-width: 220px;
   padding: 15px 23px;
@@ -1000,6 +1175,36 @@ button:focus-visible {
 .result-stats strong,
 .result-stats small {
   display: block;
+}
+
+.result-actions {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.result-actions .primary-button.compact {
+  margin-top: 0;
+}
+
+.secondary-button {
+  min-width: 140px;
+  padding: 11px 18px;
+  border: 2px solid #705838;
+  border-radius: 12px;
+  background: #fff3cf;
+  color: #4f402c;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 900;
+  box-shadow: 0 4px 0 #8f734a;
+}
+
+.secondary-button:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
 }
 
 .result-stats strong {
@@ -1133,8 +1338,8 @@ button:focus-visible {
   }
 
   .sun-bank {
-    width: 68px;
-    min-width: 68px;
+    width: 76px;
+    min-width: 76px;
     grid-template-columns: 27px 1fr;
   }
 
@@ -1181,6 +1386,18 @@ button:focus-visible {
   .intro-panel p {
     margin: 17px 0;
     line-height: 1.55;
+  }
+
+  .level-picker {
+    margin-bottom: 12px;
+  }
+
+  .level-card {
+    padding: 8px;
+  }
+
+  .level-card span {
+    display: none;
   }
 
   .intro-tips {
