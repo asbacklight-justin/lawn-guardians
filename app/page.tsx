@@ -12,7 +12,8 @@ type PlantKey =
   | "mooncap";
 type Tool = PlantKey | "shovel" | null;
 type Phase = "ready" | "playing" | "won" | "lost";
-type LevelId = 1 | 2;
+type LevelId = 1 | 2 | 3;
+type GameMode = "campaign" | "endless";
 
 type Plant = {
   id: number;
@@ -49,6 +50,8 @@ type Burst = { id: number; row: number; x: number; ttl: number };
 type Tombstone = { id: number; row: number; col: number };
 type GameState = {
   level: LevelId;
+  mode: GameMode;
+  endlessStage: number;
   phase: Phase;
   paused: boolean;
   speed: 1 | 2;
@@ -67,6 +70,13 @@ type GameState = {
   nextSunAt: number;
   spawned: number;
   kills: number;
+  totalKills: number;
+  runElapsed: number;
+  tideRow: number | null;
+  tideUntil: number;
+  nextTideAt: number;
+  transitionText: string;
+  transitionUntil: number;
 };
 
 const ROWS = 5;
@@ -115,6 +125,18 @@ const LEVELS: Record<
       [3, 4],
       [4, 5],
     ],
+  },
+  3: {
+    name: "潮汐玻璃屋",
+    kicker: "第三关 · 潮线轮转",
+    description:
+      "潮水会依次淹过五条路线：水中敌人显著减速，但该行植物会暂时休眠。守住五波潮汐攻势。",
+    waves: 5,
+    totalEnemies: 50,
+    initialSun: 200,
+    skySunBase: 6.2,
+    skySunJitter: 1.4,
+    graves: [],
   },
 };
 
@@ -213,8 +235,13 @@ const PLANTS: Record<
 
 const PLANT_ORDER = Object.keys(PLANTS) as PlantKey[];
 
-const freshGame = (level: LevelId = 1): GameState => ({
+const freshGame = (
+  level: LevelId = 1,
+  mode: GameMode = "campaign",
+): GameState => ({
   level,
+  mode,
+  endlessStage: 1,
   phase: "ready",
   paused: false,
   speed: 1,
@@ -245,9 +272,28 @@ const freshGame = (level: LevelId = 1): GameState => ({
   nextSunAt: 2,
   spawned: 0,
   kills: 0,
+  totalKills: 0,
+  runElapsed: 0,
+  tideRow: null,
+  tideUntil: 0,
+  nextTideAt: 7,
+  transitionText: "",
+  transitionUntil: 0,
 });
 
-function spawnZombie(spawned: number, level: LevelId): Zombie {
+function stageEnemyTotal(game: GameState) {
+  const extra =
+    game.mode === "endless"
+      ? Math.floor((game.endlessStage - 1) / 3) * 5
+      : 0;
+  return LEVELS[game.level].totalEnemies + extra;
+}
+
+function spawnZombie(
+  spawned: number,
+  level: LevelId,
+  endlessStage: number,
+): Zombie {
   const wave = Math.floor(spawned / 10) + 1;
   const roll = Math.random();
   const kind =
@@ -257,6 +303,12 @@ function spawnZombie(spawned: number, level: LevelId): Zombie {
         : roll < 0.52
           ? "pothead"
           : "ironhead"
+      : level === 3 && wave >= 4
+        ? roll < 0.12
+          ? "wanderer"
+          : roll < 0.48
+            ? "pothead"
+            : "ironhead"
       : wave === 1
       ? roll < 0.82
         ? "wanderer"
@@ -277,16 +329,18 @@ function spawnZombie(spawned: number, level: LevelId): Zombie {
     pothead: { hp: 410, speed: 0.15, damage: 64 },
     ironhead: { hp: 720, speed: 0.115, damage: 72 },
   }[kind];
-  const levelMultiplier = level === 2 ? 1.08 : 1;
+  const levelMultiplier = level === 2 ? 1.08 : level === 3 ? 1.14 : 1;
+  const endlessMultiplier = 1 + Math.max(0, endlessStage - 1) * 0.06;
+  const multiplier = levelMultiplier * endlessMultiplier;
   return {
     id: uid(),
     kind,
     row: Math.floor(Math.random() * ROWS),
     x: 9.35 + Math.random() * 0.35,
-    hp: Math.round(stats.hp * levelMultiplier),
-    speed: stats.speed * levelMultiplier,
-    damage: Math.round(stats.damage * levelMultiplier),
-    maxHp: Math.round(stats.hp * levelMultiplier),
+    hp: Math.round(stats.hp * multiplier),
+    speed: stats.speed * Math.min(1.45, multiplier),
+    damage: Math.round(stats.damage * multiplier),
+    maxHp: Math.round(stats.hp * multiplier),
     slowFor: 0,
   };
 }
@@ -298,6 +352,7 @@ function stepGame(previous: GameState, dt: number): GameState {
   const g: GameState = {
     ...previous,
     elapsed: previous.elapsed + dt,
+    runElapsed: previous.runElapsed + dt,
     cooldowns: { ...previous.cooldowns },
     plants: previous.plants.map((plant) => ({ ...plant })),
     zombies: previous.zombies.map((zombie) => ({ ...zombie })),
@@ -309,6 +364,12 @@ function stepGame(previous: GameState, dt: number): GameState {
 
   for (const key of PLANT_ORDER) {
     g.cooldowns[key] = Math.max(0, g.cooldowns[key] - dt);
+  }
+
+  if (g.level === 3 && g.elapsed >= g.nextTideAt) {
+    g.tideRow = g.tideRow === null ? 0 : (g.tideRow + 1) % ROWS;
+    g.tideUntil = g.elapsed + 7;
+    g.nextTideAt = g.elapsed + 13;
   }
 
   if (g.elapsed >= g.nextSunAt) {
@@ -324,18 +385,33 @@ function stepGame(previous: GameState, dt: number): GameState {
   g.suns = g.suns.filter((sun) => sun.ttl > 0);
   g.bursts = g.bursts.filter((burst) => burst.ttl > 0);
 
-  if (g.spawned < level.totalEnemies && g.elapsed >= g.nextSpawnAt) {
-    g.zombies.push(spawnZombie(g.spawned, g.level));
+  const totalEnemies = stageEnemyTotal(g);
+  if (g.spawned < totalEnemies && g.elapsed >= g.nextSpawnAt) {
+    g.zombies.push(spawnZombie(g.spawned, g.level, g.endlessStage));
     g.spawned += 1;
     const wave = Math.floor((g.spawned - 1) / 10) + 1;
+    const minimumGap =
+      g.level === 3 ? 1.25 : g.level === 2 ? 1.45 : 1.7;
+    const baseGap =
+      g.level === 3 ? 3.85 : g.level === 2 ? 4.05 : 4.35;
+    const endlessPace =
+      g.mode === "endless"
+        ? Math.max(0.72, 1 - (g.endlessStage - 1) * 0.025)
+        : 1;
     const gap = Math.max(
-      g.level === 2 ? 1.45 : 1.7,
-      (g.level === 2 ? 4.05 : 4.35) - wave * 0.72,
+      minimumGap,
+      baseGap - wave * 0.72,
     );
-    g.nextSpawnAt = g.elapsed + gap * (0.78 + Math.random() * 0.48);
+    g.nextSpawnAt =
+      g.elapsed + gap * endlessPace * (0.78 + Math.random() * 0.48);
   }
 
   for (const plant of g.plants) {
+    const dormantByTide =
+      g.level === 3 &&
+      g.tideRow === plant.row &&
+      g.elapsed < g.tideUntil;
+    if (dormantByTide) continue;
     plant.timer -= dt;
     if (plant.timer > 0) continue;
     const def = PLANTS[plant.type];
@@ -436,7 +512,15 @@ function stepGame(previous: GameState, dt: number): GameState {
     if (target) {
       target.hp -= zombie.damage * dt;
     } else {
-      zombie.x -= zombie.speed * (zombie.slowFor > 0 ? 0.48 : 1) * dt;
+      const slowedByTide =
+        g.level === 3 &&
+        g.tideRow === zombie.row &&
+        g.elapsed < g.tideUntil;
+      zombie.x -=
+        zombie.speed *
+        (zombie.slowFor > 0 ? 0.48 : 1) *
+        (slowedByTide ? 0.38 : 1) *
+        dt;
     }
   }
 
@@ -445,6 +529,7 @@ function stepGame(previous: GameState, dt: number): GameState {
   const defeated = g.zombies.filter((zombie) => zombie.hp <= 0);
   if (defeated.length) {
     g.kills += defeated.length;
+    g.totalKills += defeated.length;
     g.score += defeated.reduce(
       (total, zombie) =>
         total +
@@ -465,6 +550,7 @@ function stepGame(previous: GameState, dt: number): GameState {
       const mowed = g.zombies.filter((zombie) => zombie.row === row).length;
       g.zombies = g.zombies.filter((zombie) => zombie.row !== row);
       g.kills += mowed;
+      g.totalKills += mowed;
       g.score += mowed * 70;
       g.mowers[row] = false;
       g.bursts.push({ id: uid(), row, x: 0.5, ttl: 1.1 });
@@ -475,13 +561,40 @@ function stepGame(previous: GameState, dt: number): GameState {
     }
   }
 
-  if (g.spawned >= level.totalEnemies && g.zombies.length === 0) {
-    g.phase = "won";
-    g.paused = false;
-    g.score += Math.max(
-      0,
-      Math.round((g.level === 2 ? 3800 : 2500) - g.elapsed * 12),
-    );
+  if (g.spawned >= totalEnemies && g.zombies.length === 0) {
+    if (g.mode === "endless") {
+      const nextLevel = (g.level === 3 ? 1 : g.level + 1) as LevelId;
+      const nextStage = g.endlessStage + 1;
+      const occupied = new Set(
+        g.plants.map((plant) => `${plant.row}-${plant.col}`),
+      );
+      g.level = nextLevel;
+      g.endlessStage = nextStage;
+      g.elapsed = 0;
+      g.nextSpawnAt = 3.2;
+      g.nextSunAt = 1.8;
+      g.spawned = 0;
+      g.kills = 0;
+      g.zombies = [];
+      g.bullets = [];
+      g.bursts = [];
+      g.tombstones = LEVELS[nextLevel].graves
+        .filter(([row, col]) => !occupied.has(`${row}-${col}`))
+        .map(([row, col]) => ({ id: uid(), row, col }));
+      g.mowers = Array(ROWS).fill(true);
+      g.tideRow = null;
+      g.tideUntil = 0;
+      g.nextTideAt = 7;
+      g.transitionText = `无尽第 ${nextStage} 站 · ${LEVELS[nextLevel].name}`;
+      g.transitionUntil = 3;
+      g.score += 1800 + nextStage * 220;
+    } else {
+      g.phase = "won";
+      g.paused = false;
+      const levelBonus =
+        g.level === 3 ? 5200 : g.level === 2 ? 3800 : 2500;
+      g.score += Math.max(0, Math.round(levelBonus - g.elapsed * 12));
+    }
   }
   return g;
 }
@@ -511,6 +624,7 @@ function ZombieSprite({ kind }: { kind: Zombie["kind"] }) {
 export default function Home() {
   const [game, setGame] = useState<GameState>(() => freshGame(1));
   const [selectedLevel, setSelectedLevel] = useState<LevelId>(1);
+  const [selectedMode, setSelectedMode] = useState<GameMode>("campaign");
   const [selected, setSelected] = useState<Tool>(null);
   const [muted, setMuted] = useState(false);
   const [toast, setToast] = useState("");
@@ -627,7 +741,10 @@ export default function Home() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key >= "1" && event.key <= "7") {
         const plant = PLANT_ORDER[Number(event.key) - 1];
-        if (plant && (plant !== "mooncap" || game.level === 2)) {
+        const mooncapUnlocked =
+          game.level >= 2 ||
+          (game.mode === "endless" && game.endlessStage > 1);
+        if (plant && (plant !== "mooncap" || mooncapUnlocked)) {
           setSelected(plant);
         }
       }
@@ -640,28 +757,54 @@ export default function Home() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [collectAllSuns, game.level, game.phase]);
+  }, [
+    collectAllSuns,
+    game.endlessStage,
+    game.level,
+    game.mode,
+    game.phase,
+  ]);
 
   const level = LEVELS[game.level];
-  const wave = Math.min(level.waves, Math.floor(game.spawned / 10) + 1);
+  const totalEnemies = stageEnemyTotal(game);
+  const totalWaves = Math.ceil(totalEnemies / 10);
+  const wave = Math.min(totalWaves, Math.floor(game.spawned / 10) + 1);
   const progress = Math.min(
     100,
-    ((game.spawned + game.kills * 0.15) / level.totalEnemies) * 100,
+    (game.spawned / totalEnemies) * 100,
   );
+  const tideActive =
+    game.level === 3 &&
+    game.tideRow !== null &&
+    game.elapsed < game.tideUntil;
+  const mooncapUnlocked =
+    game.level >= 2 ||
+    (game.mode === "endless" && game.endlessStage > 1);
   const selectedPlant = selected && selected !== "shovel" ? PLANTS[selected] : null;
 
-  const startGame = (levelId: LevelId = selectedLevel) => {
+  const startGame = (
+    levelId: LevelId = selectedLevel,
+    mode: GameMode = selectedMode,
+  ) => {
     collectionTimers.current.forEach((timer) => window.clearTimeout(timer));
     collectionTimers.current = [];
     setBestScore((current) => Math.max(current, game.score));
-    const next = freshGame(levelId);
+    const startingLevel = mode === "endless" ? 1 : levelId;
+    const next = freshGame(startingLevel, mode);
     next.phase = "playing";
     setGame(next);
-    setSelectedLevel(levelId);
+    setSelectedLevel(startingLevel);
+    setSelectedMode(mode);
     setSelected(null);
-    setToast(
-      levelId === 2 ? "月雾升起，第一波正在靠近……" : "第一波正在靠近……",
-    );
+    const startToast =
+      mode === "endless"
+        ? "无尽远征开始：阳光与植物将跨关保留"
+        : startingLevel === 3
+          ? "潮线启动，留意即将休眠的路线……"
+          : startingLevel === 2
+            ? "月雾升起，第一波正在靠近……"
+            : "第一波正在靠近……";
+    setToast(startToast);
     tone(440, 0.12);
     window.setTimeout(() => tone(660, 0.16), 90);
   };
@@ -761,7 +904,7 @@ export default function Home() {
   };
 
   const availablePlants = PLANT_ORDER.filter(
-    (key) => key !== "mooncap" || game.level === 2,
+    (key) => key !== "mooncap" || mooncapUnlocked,
   );
   const cardList = availablePlants.map((key) => {
     const def = PLANTS[key];
@@ -791,10 +934,19 @@ export default function Home() {
       </button>
     );
   });
-  const previewLevel = LEVELS[selectedLevel];
+  const previewLevel =
+    selectedMode === "endless" ? LEVELS[1] : LEVELS[selectedLevel];
 
   return (
-    <main className={`game-shell level-${game.phase === "ready" ? selectedLevel : game.level}`}>
+    <main
+      className={`game-shell level-${
+        game.phase === "ready"
+          ? selectedMode === "endless"
+            ? 1
+            : selectedLevel
+          : game.level
+      }`}
+    >
       <header className="topbar">
         <div className="brand">
           <span className="brand-leaf">✦</span>
@@ -806,16 +958,21 @@ export default function Home() {
         <div className="wave-meter" aria-label={`第 ${wave} 波`}>
           <div className="wave-copy">
             <span>
-              {level.name} · 第 {wave} 波 / {level.waves}
+              {game.mode === "endless"
+                ? `无尽第 ${game.endlessStage} 站 · `
+                : ""}
+              {level.name} · 第 {wave} 波 / {totalWaves}
             </span>
-            <span>{game.kills} 击退</span>
+            <span>
+              {game.mode === "endless" ? game.totalKills : game.kills} 击退
+            </span>
           </div>
           <div className="meter-track">
             <span style={{ width: `${progress}%` }} />
-            {Array.from({ length: level.waves - 1 }, (_, index) => (
+            {Array.from({ length: totalWaves - 1 }, (_, index) => (
               <i
                 key={index}
-                style={{ left: `${((index + 1) / level.waves) * 100}%` }}
+                style={{ left: `${((index + 1) / totalWaves) * 100}%` }}
               />
             ))}
           </div>
@@ -897,7 +1054,15 @@ export default function Home() {
                 </span>
               ))}
             </aside>
-            <div className={`lawn-stage ${game.level === 2 ? "night-stage" : ""}`}>
+            <div
+              className={`lawn-stage ${
+                game.level === 2
+                  ? "night-stage"
+                  : game.level === 3
+                    ? "tide-stage"
+                    : ""
+              }`}
+            >
               <div className="lawn-grid">
                 {Array.from({ length: ROWS * COLS }, (_, index) => {
                   const row = Math.floor(index / COLS);
@@ -921,6 +1086,17 @@ export default function Home() {
                 })}
               </div>
 
+              {tideActive && (
+                <div
+                  className="tide-strip"
+                  style={{ top: `${(game.tideRow! / ROWS) * 100}%` }}
+                  role="status"
+                  aria-label={`第 ${game.tideRow! + 1} 行潮水涌入，敌人减速，植物休眠`}
+                >
+                  <span>≈ 潮水：敌人减速 · 植物休眠 ≈</span>
+                </div>
+              )}
+
               {game.tombstones.map((tombstone) => (
                 <span
                   key={tombstone.id}
@@ -938,7 +1114,11 @@ export default function Home() {
               {game.plants.map((plant) => (
                 <button
                   key={plant.id}
-                  className="plant-unit"
+                  className={`plant-unit ${
+                    tideActive && plant.row === game.tideRow
+                      ? "tide-dormant"
+                      : ""
+                  }`}
                   style={{
                     left: `${((plant.col + 0.5) / COLS) * 100}%`,
                     top: `${((plant.row + 0.5) / ROWS) * 100}%`,
@@ -956,7 +1136,13 @@ export default function Home() {
               {game.zombies.map((zombie) => (
                 <div
                   key={zombie.id}
-                  className={`zombie-unit ${zombie.slowFor > 0 ? "slowed" : ""}`}
+                  className={`zombie-unit ${
+                    zombie.slowFor > 0 ? "slowed" : ""
+                  } ${
+                    tideActive && zombie.row === game.tideRow
+                      ? "tide-slowed"
+                      : ""
+                  }`}
                   style={{
                     left: `${(zombie.x / COLS) * 100}%`,
                     top: `${((zombie.row + 0.5) / ROWS) * 100}%`,
@@ -1010,9 +1196,18 @@ export default function Home() {
               ))}
 
               <div className="right-fog" aria-hidden="true">
-                <span>♱</span>
-                <span>♱</span>
+                <span>{game.level === 3 ? "≈" : "♱"}</span>
+                <span>{game.level === 3 ? "◌" : "♱"}</span>
               </div>
+
+              {game.mode === "endless" &&
+                game.transitionText &&
+                game.elapsed < game.transitionUntil && (
+                  <div className="stage-transition" role="status">
+                    <small>阳光与植物已保留</small>
+                    <strong>{game.transitionText}</strong>
+                  </div>
+                )}
             </div>
           </div>
         </div>
@@ -1024,9 +1219,12 @@ export default function Home() {
             ? "点击草坪上的植物将其铲除"
             : selectedPlant
               ? `已选择 ${selectedPlant.name} · 点击空草格种植`
-              : `按 1–${game.level === 2 ? "7" : "6"} 选植物 · A 自动收集阳光 · 空格暂停`}
+              : `按 1–${mooncapUnlocked ? "7" : "6"} 选植物 · A 自动收集阳光 · 空格暂停`}
         </span>
-        <span>最高分 {Math.max(bestScore, game.score)}</span>
+        <span>
+          {game.mode === "endless" ? `无尽第 ${game.endlessStage} 站 · ` : ""}
+          最高分 {Math.max(bestScore, game.score)}
+        </span>
       </footer>
 
       {toast && <div className="toast">{toast}</div>}
@@ -1042,37 +1240,97 @@ export default function Home() {
               <br />
               守卫战
             </h1>
-            <p>{previewLevel.description}</p>
-            <div className="level-picker" role="radiogroup" aria-label="选择关卡">
+            <p>
+              {selectedMode === "endless"
+                ? "从夕照前院出发，无缝穿过月雾墓园与潮汐玻璃屋。阳光、植物、生命与分数跨关保留，敌人每轮都会更强。"
+                : previewLevel.description}
+            </p>
+            <div className="mode-picker" role="radiogroup" aria-label="选择模式">
               <button
-                className={`level-card ${selectedLevel === 1 ? "active" : ""}`}
-                onClick={() => setSelectedLevel(1)}
+                className={selectedMode === "campaign" ? "active" : ""}
+                onClick={() => setSelectedMode("campaign")}
                 role="radio"
-                aria-checked={selectedLevel === 1}
+                aria-checked={selectedMode === "campaign"}
               >
-                <small>LEVEL 01</small>
-                <strong>夕照前院</strong>
-                <span>3 波 · 经典草坪</span>
+                <small>关卡模式</small>
+                <strong>自由选择战场</strong>
               </button>
               <button
-                className={`level-card night ${selectedLevel === 2 ? "active" : ""}`}
-                onClick={() => setSelectedLevel(2)}
+                className={`endless ${selectedMode === "endless" ? "active" : ""}`}
+                onClick={() => setSelectedMode("endless")}
                 role="radio"
-                aria-checked={selectedLevel === 2}
+                aria-checked={selectedMode === "endless"}
               >
-                <small>LEVEL 02</small>
-                <strong>月雾墓园</strong>
-                <span>4 波 · 新植物 月芒菇 🍄</span>
+                <small>无尽模式</small>
+                <strong>植物与阳光不重置 ∞</strong>
               </button>
             </div>
-            <button className="primary-button" onClick={() => startGame()}>
-              <span>开始 {previewLevel.name}</span>
+            {selectedMode === "campaign" ? (
+              <div
+                className="level-picker"
+                role="radiogroup"
+                aria-label="选择关卡"
+              >
+                <button
+                  className={`level-card ${selectedLevel === 1 ? "active" : ""}`}
+                  onClick={() => setSelectedLevel(1)}
+                  role="radio"
+                  aria-checked={selectedLevel === 1}
+                >
+                  <small>LEVEL 01</small>
+                  <strong>夕照前院</strong>
+                  <span>3 波 · 经典草坪</span>
+                </button>
+                <button
+                  className={`level-card night ${selectedLevel === 2 ? "active" : ""}`}
+                  onClick={() => setSelectedLevel(2)}
+                  role="radio"
+                  aria-checked={selectedLevel === 2}
+                >
+                  <small>LEVEL 02</small>
+                  <strong>月雾墓园</strong>
+                  <span>4 波 · 墓碑与月芒菇</span>
+                </button>
+                <button
+                  className={`level-card tide ${selectedLevel === 3 ? "active" : ""}`}
+                  onClick={() => setSelectedLevel(3)}
+                  role="radio"
+                  aria-checked={selectedLevel === 3}
+                >
+                  <small>LEVEL 03</small>
+                  <strong>潮汐玻璃屋</strong>
+                  <span>5 波 · 路线轮流休眠</span>
+                </button>
+              </div>
+            ) : (
+              <div className="endless-route" aria-label="无尽模式关卡路线">
+                <span>01 夕照</span>
+                <b>→</b>
+                <span>02 月雾</span>
+                <b>→</b>
+                <span>03 潮汐</span>
+                <b>↻</b>
+              </div>
+            )}
+            <button
+              className="primary-button"
+              onClick={() => startGame(selectedLevel, selectedMode)}
+            >
+              <span>
+                {selectedMode === "endless"
+                  ? "开始无尽远征"
+                  : `开始 ${previewLevel.name}`}
+              </span>
               <b>▶</b>
             </button>
             <div className="intro-tips">
               <span>☀ 按 A 自动收集阳光</span>
               <span>🌿 选择卡片后种植</span>
-              <span>🏁 击退全部 {previewLevel.waves} 波</span>
+              <span>
+                {selectedMode === "endless"
+                  ? "∞ 跨关保留阳光与植物"
+                  : `🏁 击退全部 ${previewLevel.waves} 波`}
+              </span>
             </div>
           </div>
         </section>
@@ -1103,14 +1361,22 @@ export default function Home() {
               {game.phase === "won" ? "🏆" : "🌘"}
             </span>
             <span className="eyebrow">
-              {game.phase === "won" ? "花园守住了！" : "防线被突破"}
+              {game.phase === "won"
+                ? "花园守住了！"
+                : game.mode === "endless"
+                  ? `无尽远征止步第 ${game.endlessStage} 站`
+                  : "防线被突破"}
             </span>
             <h2>
               {game.phase === "won"
-                ? game.level === 2
-                  ? "月雾退散"
-                  : "黎明到来"
-                : "再试一次"}
+                ? game.level === 3
+                  ? "潮声退去"
+                  : game.level === 2
+                    ? "月雾退散"
+                    : "黎明到来"
+                : game.mode === "endless"
+                  ? "远征暂歇"
+                  : "再试一次"}
             </h2>
             <div className="result-stats">
               <div>
@@ -1118,28 +1384,45 @@ export default function Home() {
                 <small>本局得分</small>
               </div>
               <div>
-                <strong>{game.kills}</strong>
+                <strong>
+                  {game.mode === "endless" ? game.totalKills : game.kills}
+                </strong>
                 <small>击退敌人</small>
               </div>
               <div>
-                <strong>{Math.floor(game.elapsed)}s</strong>
+                <strong>
+                  {Math.floor(
+                    game.mode === "endless" ? game.runElapsed : game.elapsed,
+                  )}
+                  s
+                </strong>
                 <small>坚持时间</small>
               </div>
             </div>
             <div className="result-actions">
-              {game.phase === "won" && game.level === 1 && (
+              {game.phase === "won" && game.level < 3 && (
                 <button
                   className="primary-button compact"
-                  onClick={() => startGame(2)}
+                  onClick={() =>
+                    startGame((game.level + 1) as LevelId, "campaign")
+                  }
                 >
-                  进入第二关
+                  进入第 {game.level + 1} 关
                 </button>
               )}
               <button
-                className="secondary-button"
-                onClick={() => startGame(game.level)}
+                className={
+                  game.mode === "endless"
+                    ? "primary-button compact"
+                    : "secondary-button"
+                }
+                onClick={() =>
+                  game.mode === "endless"
+                    ? startGame(1, "endless")
+                    : startGame(game.level, "campaign")
+                }
               >
-                重玩本关
+                {game.mode === "endless" ? "重新远征" : "重玩本关"}
               </button>
             </div>
           </div>
