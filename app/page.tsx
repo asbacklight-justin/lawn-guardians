@@ -12,7 +12,7 @@ type PlantKey =
   | "mooncap";
 type Tool = PlantKey | "shovel" | null;
 type Phase = "ready" | "playing" | "won" | "lost";
-type LevelId = 1 | 2 | 3 | 4 | 5;
+type LevelId = 1 | 2 | 3 | 4 | 5 | 6;
 type GameMode = "campaign" | "gauntlet";
 
 type Plant = {
@@ -34,6 +34,7 @@ type Zombie = {
   speed: number;
   damage: number;
   slowFor: number;
+  echo: boolean;
 };
 type Bullet = {
   id: number;
@@ -84,6 +85,8 @@ type GameState = {
   meteorStrikeAt: number;
   nextMeteorAt: number;
   meteorFlashUntil: number;
+  nextEchoAt: number;
+  echoPulseUntil: number;
   transitionText: string;
   transitionUntil: number;
 };
@@ -161,7 +164,7 @@ const LEVELS: Record<
   },
   5: {
     name: "星陨天台",
-    kicker: "第五关 · 终章天灾",
+    kicker: "第五关 · 星轨天灾",
     description:
       "红色轨道会提前四秒锁定整列，随后陨星同时重创植物与敌人。借天灾清场，守住七波终章攻势。",
     waves: 7,
@@ -169,6 +172,18 @@ const LEVELS: Record<
     initialSun: 250,
     skySunBase: 7.1,
     skySunJitter: 1.3,
+    graves: [],
+  },
+  6: {
+    name: "镜像回廊",
+    kicker: "第六关 · 幽影终局",
+    description:
+      "镜面每隔十八秒复制所有普通敌人，在对称路线生成高速幽影。看懂镜像关系，守住八波最终防线。",
+    waves: 8,
+    totalEnemies: 80,
+    initialSun: 275,
+    skySunBase: 7.8,
+    skySunJitter: 1.4,
     graves: [],
   },
 };
@@ -319,6 +334,8 @@ const freshGame = (
   meteorStrikeAt: 0,
   nextMeteorAt: 6,
   meteorFlashUntil: 0,
+  nextEchoAt: 10,
+  echoPulseUntil: 0,
   transitionText: "",
   transitionUntil: 0,
 });
@@ -340,6 +357,12 @@ function spawnZombie(
         : roll < 0.52
           ? "pothead"
           : "ironhead"
+      : level === 6 && wave >= 4
+        ? roll < 0.04
+          ? "wanderer"
+          : roll < 0.32
+            ? "pothead"
+            : "ironhead"
       : level === 5 && wave >= 4
         ? roll < 0.05
           ? "wanderer"
@@ -387,7 +410,9 @@ function spawnZombie(
           ? 1.2
           : level === 5
             ? 1.28
-            : 1;
+            : level === 6
+              ? 1.36
+              : 1;
   return {
     id: uid(),
     kind,
@@ -398,6 +423,7 @@ function spawnZombie(
     damage: Math.round(stats.damage * multiplier),
     maxHp: Math.round(stats.hp * multiplier),
     slowFor: 0,
+    echo: false,
   };
 }
 
@@ -476,6 +502,36 @@ function stepGame(previous: GameState, dt: number): GameState {
     g.nextMeteorAt = g.elapsed + 14;
   }
 
+  if (g.level === 6 && g.elapsed >= g.nextEchoAt) {
+    const originals = g.zombies.filter(
+      (zombie) => !zombie.echo && zombie.hp > 0 && zombie.x > 0.8,
+    );
+    const echoes = originals.map((zombie) => {
+      const maxHp = Math.max(70, Math.round(zombie.maxHp * 0.35));
+      const mirroredRow =
+        zombie.row === 2
+          ? zombie.id % 2 === 0
+            ? 1
+            : 3
+          : ROWS - 1 - zombie.row;
+      return {
+        ...zombie,
+        id: uid(),
+        row: mirroredRow,
+        x: Math.min(9.55, zombie.x + 0.18),
+        hp: Math.min(maxHp, Math.max(45, Math.round(zombie.hp * 0.35))),
+        maxHp,
+        speed: zombie.speed * 1.18,
+        damage: Math.round(zombie.damage * 0.72),
+        slowFor: 0,
+        echo: true,
+      };
+    });
+    g.zombies.push(...echoes);
+    g.echoPulseUntil = g.elapsed + 1.6;
+    g.nextEchoAt = g.elapsed + 18;
+  }
+
   if (g.elapsed >= g.nextSunAt) {
     g.suns.push({
       id: uid(),
@@ -495,25 +551,29 @@ function stepGame(previous: GameState, dt: number): GameState {
     g.spawned += 1;
     const wave = Math.floor((g.spawned - 1) / 10) + 1;
     const minimumGap =
-      g.level === 5
-        ? 0.95
-        : g.level === 4
-          ? 1.1
-          : g.level === 3
-            ? 1.25
-            : g.level === 2
-              ? 1.45
-              : 1.7;
+      g.level === 6
+        ? 0.9
+        : g.level === 5
+          ? 0.95
+          : g.level === 4
+            ? 1.1
+            : g.level === 3
+              ? 1.25
+              : g.level === 2
+                ? 1.45
+                : 1.7;
     const baseGap =
-      g.level === 5
-        ? 3.4
-        : g.level === 4
-          ? 3.6
-          : g.level === 3
-            ? 3.85
-            : g.level === 2
-              ? 4.05
-              : 4.35;
+      g.level === 6
+        ? 3.25
+        : g.level === 5
+          ? 3.4
+          : g.level === 4
+            ? 3.6
+            : g.level === 3
+              ? 3.85
+              : g.level === 2
+                ? 4.05
+                : 4.35;
     const gap = Math.max(
       minimumGap,
       baseGap - wave * 0.72,
@@ -649,11 +709,13 @@ function stepGame(previous: GameState, dt: number): GameState {
     g.score += defeated.reduce(
       (total, zombie) =>
         total +
-        (zombie.kind === "ironhead"
-          ? 260
-          : zombie.kind === "pothead"
-            ? 150
-            : 90),
+        Math.round(
+          (zombie.kind === "ironhead"
+            ? 260
+            : zombie.kind === "pothead"
+              ? 150
+              : 90) * (zombie.echo ? 0.45 : 1),
+        ),
       0,
     );
   }
@@ -678,7 +740,7 @@ function stepGame(previous: GameState, dt: number): GameState {
   }
 
   if (g.spawned >= totalEnemies && g.zombies.length === 0) {
-    if (g.mode === "gauntlet" && g.level < 5) {
+    if (g.mode === "gauntlet" && g.level < 6) {
       const nextLevel = (g.level + 1) as LevelId;
       const nextStage = g.journeyStage + 1;
       const occupied = new Set(
@@ -710,6 +772,8 @@ function stepGame(previous: GameState, dt: number): GameState {
       g.meteorStrikeAt = 0;
       g.nextMeteorAt = 6;
       g.meteorFlashUntil = 0;
+      g.nextEchoAt = 10;
+      g.echoPulseUntil = 0;
       g.transitionText = `连续远征第 ${nextStage} 站 · ${LEVELS[nextLevel].name}`;
       g.transitionUntil = 3;
       g.score += 1800 + nextStage * 220;
@@ -717,15 +781,17 @@ function stepGame(previous: GameState, dt: number): GameState {
       g.phase = "won";
       g.paused = false;
       const levelBonus =
-        g.level === 5
-          ? 8800
-          : g.level === 4
-            ? 6800
-            : g.level === 3
-              ? 5200
-              : g.level === 2
-                ? 3800
-                : 2500;
+        g.level === 6
+          ? 10800
+          : g.level === 5
+            ? 8800
+            : g.level === 4
+              ? 6800
+              : g.level === 3
+                ? 5200
+                : g.level === 2
+                  ? 3800
+                  : 2500;
       g.score += Math.max(0, Math.round(levelBonus - g.elapsed * 12));
     }
   }
@@ -915,6 +981,11 @@ export default function Home() {
     game.level === 5 && game.meteorColumn !== null;
   const meteorFlash =
     game.level === 5 && game.elapsed < game.meteorFlashUntil;
+  const echoCountdown = game.nextEchoAt - game.elapsed;
+  const echoWarning =
+    game.level === 6 && echoCountdown > 0 && echoCountdown <= 3;
+  const echoPulse =
+    game.level === 6 && game.elapsed < game.echoPulseUntil;
   const mooncapUnlocked =
     game.level >= 2 ||
     (game.mode === "gauntlet" && game.journeyStage > 1);
@@ -936,16 +1007,18 @@ export default function Home() {
     setSelected(null);
     const startToast =
       mode === "gauntlet"
-        ? "连续远征开始：五关连战，阳光与植物跨关保留"
-        : startingLevel === 5
-          ? "星轨正在校准，红色警戒列即将出现……"
-          : startingLevel === 4
-            ? "钟声响起，第一阵风即将改变敌人路线……"
-            : startingLevel === 3
-              ? "潮线启动，留意即将休眠的路线……"
-              : startingLevel === 2
-                ? "月雾升起，第一波正在靠近……"
-                : "第一波正在靠近……";
+        ? "连续远征开始：六关连战，阳光与植物跨关保留"
+        : startingLevel === 6
+          ? "镜面正在共振，留意即将出现的对称幽影……"
+          : startingLevel === 5
+            ? "星轨正在校准，红色警戒列即将出现……"
+            : startingLevel === 4
+              ? "钟声响起，第一阵风即将改变敌人路线……"
+              : startingLevel === 3
+                ? "潮线启动，留意即将休眠的路线……"
+                : startingLevel === 2
+                  ? "月雾升起，第一波正在靠近……"
+                  : "第一波正在靠近……";
     setToast(startToast);
     tone(440, 0.12);
     window.setTimeout(() => tone(660, 0.16), 90);
@@ -1206,6 +1279,8 @@ export default function Home() {
                       ? "wind-stage"
                       : game.level === 5
                         ? "meteor-stage"
+                        : game.level === 6
+                          ? "mirror-stage"
                     : ""
               }`}
             >
@@ -1297,6 +1372,22 @@ export default function Home() {
                 />
               )}
 
+              {echoWarning && (
+                <div className="echo-warning" role="status">
+                  <span>镜像增援</span>
+                  <strong>{Math.max(1, Math.ceil(echoCountdown))}</strong>
+                  <span>对称路线</span>
+                </div>
+              )}
+
+              {echoPulse && (
+                <div className="echo-pulse" aria-hidden="true">
+                  <i />
+                  <i />
+                  <i />
+                </div>
+              )}
+
               {game.tombstones.map((tombstone) => (
                 <span
                   key={tombstone.id}
@@ -1346,12 +1437,14 @@ export default function Home() {
                     tideActive && zombie.row === game.tideRow
                       ? "tide-slowed"
                       : ""
-                  } ${windActive ? "wind-tossed" : ""}`}
+                  } ${windActive ? "wind-tossed" : ""} ${
+                    zombie.echo ? "echo-zombie" : ""
+                  }`}
                   style={{
                     left: `${(zombie.x / COLS) * 100}%`,
                     top: `${((zombie.row + 0.5) / ROWS) * 100}%`,
                   }}
-                  aria-label={`入侵者，生命值 ${Math.ceil(zombie.hp)}`}
+                  aria-label={`${zombie.echo ? "幽影" : ""}入侵者，生命值 ${Math.ceil(zombie.hp)}`}
                 >
                   <span className="hp-track enemy-hp">
                     <i style={{ width: `${(zombie.hp / zombie.maxHp) * 100}%` }} />
@@ -1403,20 +1496,24 @@ export default function Home() {
                 <span>
                   {game.level === 5
                     ? "✦"
-                    : game.level === 4
-                      ? "≋"
-                      : game.level === 3
-                        ? "≈"
-                        : "♱"}
+                    : game.level === 6
+                      ? "◇"
+                      : game.level === 4
+                        ? "≋"
+                        : game.level === 3
+                          ? "≈"
+                          : "♱"}
                 </span>
                 <span>
                   {game.level === 5
                     ? "☄"
-                    : game.level === 4
-                      ? "◒"
-                      : game.level === 3
-                        ? "◌"
-                        : "♱"}
+                    : game.level === 6
+                      ? "◈"
+                      : game.level === 4
+                        ? "◒"
+                        : game.level === 3
+                          ? "◌"
+                          : "♱"}
                 </span>
               </div>
 
@@ -1464,7 +1561,7 @@ export default function Home() {
             </h1>
             <p>
               {selectedMode === "gauntlet"
-                ? "从夕照前院出发，无缝穿过月雾墓园、潮汐玻璃屋、风暴钟楼与星陨天台。阳光、植物、生命与分数跨关保留，第五关结束后赢得远征。"
+                ? "从夕照前院出发，连续穿过月雾、潮汐、风暴与星陨战场，最终抵达镜像回廊。阳光、植物、生命与分数跨关保留，第六关结束后赢得远征。"
                 : previewLevel.description}
             </p>
             <div className="mode-picker" role="radiogroup" aria-label="选择模式">
@@ -1484,7 +1581,7 @@ export default function Home() {
                 aria-checked={selectedMode === "gauntlet"}
               >
                 <small>连续远征</small>
-                <strong>五关连战 · 状态不重置</strong>
+                <strong>六关连战 · 状态不重置</strong>
               </button>
             </div>
             {selectedMode === "campaign" ? (
@@ -1543,6 +1640,16 @@ export default function Home() {
                   <strong>星陨天台</strong>
                   <span>7 波 · 预警列双向伤害</span>
                 </button>
+                <button
+                  className={`level-card mirror ${selectedLevel === 6 ? "active" : ""}`}
+                  onClick={() => setSelectedLevel(6)}
+                  role="radio"
+                  aria-checked={selectedLevel === 6}
+                >
+                  <small>LEVEL 06</small>
+                  <strong>镜像回廊</strong>
+                  <span>8 波 · 对称路线生成幽影</span>
+                </button>
               </div>
             ) : (
               <div className="gauntlet-route" aria-label="连续远征关卡路线">
@@ -1555,6 +1662,8 @@ export default function Home() {
                 <span>04 风暴</span>
                 <b>→</b>
                 <span>05 星陨</span>
+                <b>→</b>
+                <span>06 镜像</span>
                 <b>🏆</b>
               </div>
             )}
@@ -1574,7 +1683,7 @@ export default function Home() {
               <span>🌿 选择卡片后种植</span>
               <span>
                 {selectedMode === "gauntlet"
-                  ? "🏆 五关连战后获得胜利"
+                  ? "🏆 六关连战后获得胜利"
                   : `🏁 击退全部 ${previewLevel.waves} 波`}
               </span>
             </div>
@@ -1609,7 +1718,7 @@ export default function Home() {
             <span className="eyebrow">
               {game.phase === "won"
                 ? game.mode === "gauntlet"
-                  ? "五座花园全部守住！"
+                  ? "六座花园全部守住！"
                   : "花园守住了！"
                 : game.mode === "gauntlet"
                   ? `连续远征止步第 ${game.journeyStage} 站`
@@ -1619,15 +1728,17 @@ export default function Home() {
               {game.phase === "won"
                 ? game.mode === "gauntlet"
                   ? "远征凯旋"
-                  : game.level === 5
-                    ? "星火坠落"
-                    : game.level === 4
-                      ? "风暴止息"
-                      : game.level === 3
-                        ? "潮声退去"
-                        : game.level === 2
-                          ? "月雾退散"
-                          : "黎明到来"
+                  : game.level === 6
+                    ? "镜影归寂"
+                    : game.level === 5
+                      ? "星火坠落"
+                      : game.level === 4
+                        ? "风暴止息"
+                        : game.level === 3
+                          ? "潮声退去"
+                          : game.level === 2
+                            ? "月雾退散"
+                            : "黎明到来"
                 : game.mode === "gauntlet"
                   ? "远征暂歇"
                   : "再试一次"}
@@ -1656,7 +1767,7 @@ export default function Home() {
             <div className="result-actions">
               {game.phase === "won" &&
                 game.mode === "campaign" &&
-                game.level < 5 && (
+                game.level < 6 && (
                 <button
                   className="primary-button compact"
                   onClick={() =>
