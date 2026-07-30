@@ -34,6 +34,13 @@ test("server-renders the Lawn Guardians game shell", async () => {
   assert.match(html, /开始/);
   assert.match(html, /第一关 · 熟悉防线/);
   assert.match(html, /月雾墓园/);
+  assert.match(html, /潮汐玻璃屋/);
+  assert.match(html, /风暴钟楼/);
+  assert.match(html, /星陨天台/);
+  assert.match(html, /镜像回廊/);
+  assert.match(html, /蚀光天文台/);
+  assert.match(html, /连续远征/);
+  assert.match(html, /七关连战 · 状态不重置/);
   assert.match(html, /月芒菇/);
   assert.match(html, /自动收集场上全部阳光/);
   assert.match(html, /og\.png/);
