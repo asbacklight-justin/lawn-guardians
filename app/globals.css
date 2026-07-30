@@ -640,6 +640,42 @@ button:focus-visible {
   background: linear-gradient(90deg, transparent, #18265bd4);
 }
 
+.observatory-stage {
+  background:
+    linear-gradient(90deg, transparent 84%, #4b3b4666),
+    repeating-linear-gradient(0deg, #9e9b73 0 10%, #868766 10% 20%);
+  transition: background 0.8s ease, filter 0.8s ease;
+}
+
+.observatory-stage::before {
+  background:
+    radial-gradient(circle at 78% 14%, #fff3a36b 0 4%, transparent 20%),
+    radial-gradient(ellipse at 48% 55%, #f7e49d2e, transparent 50%),
+    repeating-linear-gradient(90deg, transparent 0 11%, #50472d3b 11% 11.25%);
+}
+
+.observatory-stage.eclipse-stage {
+  background:
+    linear-gradient(90deg, transparent 82%, #160d355e),
+    repeating-linear-gradient(0deg, #3f4168 0 10%, #30385d 10% 20%);
+}
+
+.observatory-stage.eclipse-stage::before {
+  background:
+    radial-gradient(circle at 78% 14%, #110d24 0 5%, #f7ca5d96 5.6% 6.2%, transparent 17%),
+    radial-gradient(ellipse at 48% 55%, #6b62b735, transparent 52%),
+    repeating-linear-gradient(90deg, transparent 0 11%, #161b4a4d 11% 11.25%);
+}
+
+.level-7 .house-zone {
+  filter: saturate(0.7) brightness(0.78) hue-rotate(238deg);
+}
+
+.level-7 .right-fog {
+  width: 23%;
+  background: linear-gradient(90deg, transparent, #171337d4);
+}
+
 .lawn-grid {
   position: absolute;
   inset: 0;
@@ -897,6 +933,123 @@ button:focus-visible {
   color: #e6efff;
   font-size: 7px;
   font-weight: 900;
+}
+
+.sky-phase-warning {
+  position: absolute;
+  inset: 0;
+  z-index: 13;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  background: radial-gradient(circle at center, #f7eab02e, transparent 58%);
+  color: #fff4c5;
+  pointer-events: none;
+  animation: skywarn 0.7s ease-in-out infinite alternate;
+}
+
+.sky-phase-warning.dawn-coming {
+  background: radial-gradient(circle at center, #fff4a74a, transparent 60%);
+}
+
+.sky-phase-warning strong {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  margin-top: 8px;
+  border: 3px solid currentColor;
+  border-radius: 50%;
+  background: #221b3ddd;
+  font-size: 24px;
+  box-shadow: 0 0 30px #f3d98c;
+}
+
+.sky-phase-warning span {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #211b3ad9;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+}
+
+.sky-phase-pulse {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  pointer-events: none;
+  animation: skyphase 1.8s ease-out both;
+}
+
+.sky-phase-pulse.eclipse-pulse {
+  background: radial-gradient(circle at 78% 14%, #120c26 0 4%, #ffc85a 5% 6%, transparent 25%);
+}
+
+.sky-phase-pulse.dawn-pulse {
+  background: radial-gradient(circle at 78% 14%, #fff9cf 0 4%, #ffe27b78 8%, transparent 34%);
+}
+
+.sky-phase-chip {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 11;
+  min-width: 210px;
+  padding: 7px 12px;
+  transform: translateX(-50%);
+  border: 2px solid #f2dd98a8;
+  border-radius: 999px;
+  background: #4c452fce;
+  color: #fff4c4;
+  text-align: center;
+  box-shadow: 0 5px 18px #241d14a8;
+  pointer-events: none;
+}
+
+.sky-phase-chip.eclipse {
+  border-color: #aeb8ffb3;
+  background: #211b4ae3;
+  color: #e3e6ff;
+}
+
+.sky-phase-chip strong,
+.sky-phase-chip small {
+  display: block;
+}
+
+.sky-phase-chip strong {
+  font-size: 11px;
+}
+
+.sky-phase-chip small {
+  margin-top: 1px;
+  font-size: 8px;
+}
+
+.plant-unit.eclipse-empowered {
+  filter: drop-shadow(0 0 14px #c7b7ff) brightness(1.18);
+}
+
+.plant-unit.eclipse-empowered::after {
+  content: "×2";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: #4c3d8ede;
+  color: white;
+  font-size: 8px;
+  font-weight: 950;
+}
+
+.plant-unit.eclipse-dormant {
+  filter: grayscale(0.72) brightness(0.68);
+}
+
+.zombie-unit.eclipse-haste {
+  filter: saturate(1.18) brightness(1.08);
 }
 
 .lawn-cell {
@@ -1494,6 +1647,14 @@ button:focus-visible {
     0 0 0 2px #91aaff47;
 }
 
+.level-card.eclipse.active {
+  border-color: #ffe08f;
+  background: #42355fe8;
+  box-shadow:
+    inset 0 1px 0 #ffffff36,
+    0 0 0 2px #f2c96547;
+}
+
 .level-card small {
   color: #d8c56f;
   font-size: 8px;
@@ -1865,6 +2026,31 @@ button:focus-visible {
   to {
     transform: translate(-50%, -50%) scale(8);
     opacity: 0;
+  }
+}
+
+@keyframes skywarn {
+  from {
+    filter: brightness(0.78);
+    opacity: 0.62;
+  }
+  to {
+    filter: brightness(1.2);
+    opacity: 1;
+  }
+}
+
+@keyframes skyphase {
+  from {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+  24% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.14);
   }
 }
 

@@ -12,7 +12,7 @@ type PlantKey =
   | "mooncap";
 type Tool = PlantKey | "shovel" | null;
 type Phase = "ready" | "playing" | "won" | "lost";
-type LevelId = 1 | 2 | 3 | 4 | 5 | 6;
+type LevelId = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 type GameMode = "campaign" | "gauntlet";
 
 type Plant = {
@@ -87,6 +87,9 @@ type GameState = {
   meteorFlashUntil: number;
   nextEchoAt: number;
   echoPulseUntil: number;
+  eclipseActive: boolean;
+  nextSkyPhaseAt: number;
+  skyPhasePulseUntil: number;
   transitionText: string;
   transitionUntil: number;
 };
@@ -184,6 +187,18 @@ const LEVELS: Record<
     initialSun: 275,
     skySunBase: 7.8,
     skySunJitter: 1.4,
+    graves: [],
+  },
+  7: {
+    name: "蚀光天文台",
+    kicker: "第七关 · 昼夜决战",
+    description:
+      "白昼与日蚀交替：蚀中阳光停产、敌人加速，但月芒菇伤害翻倍。掌握节律，守住九波终极攻势。",
+    waves: 9,
+    totalEnemies: 90,
+    initialSun: 300,
+    skySunBase: 5.5,
+    skySunJitter: 1.1,
     graves: [],
   },
 };
@@ -336,6 +351,9 @@ const freshGame = (
   meteorFlashUntil: 0,
   nextEchoAt: 10,
   echoPulseUntil: 0,
+  eclipseActive: false,
+  nextSkyPhaseAt: 12,
+  skyPhasePulseUntil: 0,
   transitionText: "",
   transitionUntil: 0,
 });
@@ -357,6 +375,12 @@ function spawnZombie(
         : roll < 0.52
           ? "pothead"
           : "ironhead"
+      : level === 7 && wave >= 4
+        ? roll < 0.03
+          ? "wanderer"
+          : roll < 0.28
+            ? "pothead"
+            : "ironhead"
       : level === 6 && wave >= 4
         ? roll < 0.04
           ? "wanderer"
@@ -412,7 +436,9 @@ function spawnZombie(
             ? 1.28
             : level === 6
               ? 1.36
-              : 1;
+              : level === 7
+                ? 1.44
+                : 1;
   return {
     id: uid(),
     kind,
@@ -532,7 +558,13 @@ function stepGame(previous: GameState, dt: number): GameState {
     g.nextEchoAt = g.elapsed + 18;
   }
 
-  if (g.elapsed >= g.nextSunAt) {
+  if (g.level === 7 && g.elapsed >= g.nextSkyPhaseAt) {
+    g.eclipseActive = !g.eclipseActive;
+    g.skyPhasePulseUntil = g.elapsed + 1.8;
+    g.nextSkyPhaseAt = g.elapsed + (g.eclipseActive ? 10 : 14);
+  }
+
+  if (g.elapsed >= g.nextSunAt && !(g.level === 7 && g.eclipseActive)) {
     g.suns.push({
       id: uid(),
       x: 0.8 + Math.random() * 7.4,
@@ -551,29 +583,33 @@ function stepGame(previous: GameState, dt: number): GameState {
     g.spawned += 1;
     const wave = Math.floor((g.spawned - 1) / 10) + 1;
     const minimumGap =
-      g.level === 6
-        ? 0.9
-        : g.level === 5
-          ? 0.95
-          : g.level === 4
-            ? 1.1
-            : g.level === 3
-              ? 1.25
-              : g.level === 2
-                ? 1.45
-                : 1.7;
+      g.level === 7
+        ? 0.82
+        : g.level === 6
+          ? 0.9
+          : g.level === 5
+            ? 0.95
+            : g.level === 4
+              ? 1.1
+              : g.level === 3
+                ? 1.25
+                : g.level === 2
+                  ? 1.45
+                  : 1.7;
     const baseGap =
-      g.level === 6
-        ? 3.25
-        : g.level === 5
-          ? 3.4
-          : g.level === 4
-            ? 3.6
-            : g.level === 3
-              ? 3.85
-              : g.level === 2
-                ? 4.05
-                : 4.35;
+      g.level === 7
+        ? 3.1
+        : g.level === 6
+          ? 3.25
+          : g.level === 5
+            ? 3.4
+            : g.level === 4
+              ? 3.6
+              : g.level === 3
+                ? 3.85
+                : g.level === 2
+                  ? 4.05
+                  : 4.35;
     const gap = Math.max(
       minimumGap,
       baseGap - wave * 0.72,
@@ -592,6 +628,10 @@ function stepGame(previous: GameState, dt: number): GameState {
     if (plant.timer > 0) continue;
     const def = PLANTS[plant.type];
     if (plant.type === "sunbud") {
+      if (g.level === 7 && g.eclipseActive) {
+        plant.timer = 0.25;
+        continue;
+      }
       if (g.suns.length < 12) {
         g.suns.push({
           id: uid(),
@@ -623,7 +663,10 @@ function stepGame(previous: GameState, dt: number): GameState {
       id: uid(),
       row: plant.row,
       x: plant.col + 0.72,
-      damage: def.damage,
+      damage:
+        plant.type === "mooncap" && g.level === 7 && g.eclipseActive
+          ? def.damage * 2
+          : def.damage,
       slow: plant.type === "frostfern",
       pierce: plant.type === "mooncap" ? 3 : 1,
       hitIds: [],
@@ -696,6 +739,7 @@ function stepGame(previous: GameState, dt: number): GameState {
         zombie.speed *
         (zombie.slowFor > 0 ? 0.48 : 1) *
         (slowedByTide ? 0.38 : 1) *
+        (g.level === 7 && g.eclipseActive ? 1.3 : 1) *
         dt;
     }
   }
@@ -740,7 +784,7 @@ function stepGame(previous: GameState, dt: number): GameState {
   }
 
   if (g.spawned >= totalEnemies && g.zombies.length === 0) {
-    if (g.mode === "gauntlet" && g.level < 6) {
+    if (g.mode === "gauntlet" && g.level < 7) {
       const nextLevel = (g.level + 1) as LevelId;
       const nextStage = g.journeyStage + 1;
       const occupied = new Set(
@@ -774,6 +818,9 @@ function stepGame(previous: GameState, dt: number): GameState {
       g.meteorFlashUntil = 0;
       g.nextEchoAt = 10;
       g.echoPulseUntil = 0;
+      g.eclipseActive = false;
+      g.nextSkyPhaseAt = 12;
+      g.skyPhasePulseUntil = 0;
       g.transitionText = `连续远征第 ${nextStage} 站 · ${LEVELS[nextLevel].name}`;
       g.transitionUntil = 3;
       g.score += 1800 + nextStage * 220;
@@ -781,17 +828,19 @@ function stepGame(previous: GameState, dt: number): GameState {
       g.phase = "won";
       g.paused = false;
       const levelBonus =
-        g.level === 6
-          ? 10800
-          : g.level === 5
-            ? 8800
-            : g.level === 4
-              ? 6800
-              : g.level === 3
-                ? 5200
-                : g.level === 2
-                  ? 3800
-                  : 2500;
+        g.level === 7
+          ? 13200
+          : g.level === 6
+            ? 10800
+            : g.level === 5
+              ? 8800
+              : g.level === 4
+                ? 6800
+                : g.level === 3
+                  ? 5200
+                  : g.level === 2
+                    ? 3800
+                    : 2500;
       g.score += Math.max(0, Math.round(levelBonus - g.elapsed * 12));
     }
   }
@@ -986,6 +1035,11 @@ export default function Home() {
     game.level === 6 && echoCountdown > 0 && echoCountdown <= 3;
   const echoPulse =
     game.level === 6 && game.elapsed < game.echoPulseUntil;
+  const skyPhaseCountdown = game.nextSkyPhaseAt - game.elapsed;
+  const skyPhaseWarning =
+    game.level === 7 && skyPhaseCountdown > 0 && skyPhaseCountdown <= 3;
+  const skyPhasePulse =
+    game.level === 7 && game.elapsed < game.skyPhasePulseUntil;
   const mooncapUnlocked =
     game.level >= 2 ||
     (game.mode === "gauntlet" && game.journeyStage > 1);
@@ -1007,18 +1061,20 @@ export default function Home() {
     setSelected(null);
     const startToast =
       mode === "gauntlet"
-        ? "连续远征开始：六关连战，阳光与植物跨关保留"
-        : startingLevel === 6
-          ? "镜面正在共振，留意即将出现的对称幽影……"
-          : startingLevel === 5
-            ? "星轨正在校准，红色警戒列即将出现……"
-            : startingLevel === 4
-              ? "钟声响起，第一阵风即将改变敌人路线……"
-              : startingLevel === 3
-                ? "潮线启动，留意即将休眠的路线……"
-                : startingLevel === 2
-                  ? "月雾升起，第一波正在靠近……"
-                  : "第一波正在靠近……";
+        ? "连续远征开始：七关连战，阳光与植物跨关保留"
+        : startingLevel === 7
+          ? "日蚀周期启动，白昼只剩十二秒……"
+          : startingLevel === 6
+            ? "镜面正在共振，留意即将出现的对称幽影……"
+            : startingLevel === 5
+              ? "星轨正在校准，红色警戒列即将出现……"
+              : startingLevel === 4
+                ? "钟声响起，第一阵风即将改变敌人路线……"
+                : startingLevel === 3
+                  ? "潮线启动，留意即将休眠的路线……"
+                  : startingLevel === 2
+                    ? "月雾升起，第一波正在靠近……"
+                    : "第一波正在靠近……";
     setToast(startToast);
     tone(440, 0.12);
     window.setTimeout(() => tone(660, 0.16), 90);
@@ -1281,6 +1337,10 @@ export default function Home() {
                         ? "meteor-stage"
                         : game.level === 6
                           ? "mirror-stage"
+                          : game.level === 7
+                            ? `observatory-stage ${
+                                game.eclipseActive ? "eclipse-stage" : ""
+                              }`
                     : ""
               }`}
             >
@@ -1388,6 +1448,45 @@ export default function Home() {
                 </div>
               )}
 
+              {skyPhaseWarning && (
+                <div
+                  className={`sky-phase-warning ${
+                    game.eclipseActive ? "dawn-coming" : "eclipse-coming"
+                  }`}
+                  role="status"
+                >
+                  <span>
+                    {game.eclipseActive ? "☀ 白昼回归" : "◉ 日蚀将至"}
+                  </span>
+                  <strong>{Math.max(1, Math.ceil(skyPhaseCountdown))}</strong>
+                </div>
+              )}
+
+              {skyPhasePulse && (
+                <div
+                  className={`sky-phase-pulse ${
+                    game.eclipseActive ? "eclipse-pulse" : "dawn-pulse"
+                  }`}
+                  aria-hidden="true"
+                />
+              )}
+
+              {game.level === 7 && (
+                <div
+                  className={`sky-phase-chip ${
+                    game.eclipseActive ? "eclipse" : "daylight"
+                  }`}
+                  aria-live="polite"
+                >
+                  <strong>{game.eclipseActive ? "日蚀" : "白昼"}</strong>
+                  <small>
+                    {game.eclipseActive
+                      ? "阳光停产 · 敌人加速 · 月芒菇 ×2"
+                      : "阳光恢复 · 准备下一次日蚀"}
+                  </small>
+                </div>
+              )}
+
               {game.tombstones.map((tombstone) => (
                 <span
                   key={tombstone.id}
@@ -1412,6 +1511,18 @@ export default function Home() {
                   } ${
                     meteorWarning && plant.col === game.meteorColumn
                       ? "meteor-marked"
+                      : ""
+                  } ${
+                    game.level === 7 &&
+                    game.eclipseActive &&
+                    plant.type === "mooncap"
+                      ? "eclipse-empowered"
+                      : ""
+                  } ${
+                    game.level === 7 &&
+                    game.eclipseActive &&
+                    plant.type === "sunbud"
+                      ? "eclipse-dormant"
                       : ""
                   }`}
                   style={{
@@ -1439,6 +1550,10 @@ export default function Home() {
                       : ""
                   } ${windActive ? "wind-tossed" : ""} ${
                     zombie.echo ? "echo-zombie" : ""
+                  } ${
+                    game.level === 7 && game.eclipseActive
+                      ? "eclipse-haste"
+                      : ""
                   }`}
                   style={{
                     left: `${(zombie.x / COLS) * 100}%`,
@@ -1498,22 +1613,26 @@ export default function Home() {
                     ? "✦"
                     : game.level === 6
                       ? "◇"
-                      : game.level === 4
-                        ? "≋"
-                        : game.level === 3
-                          ? "≈"
-                          : "♱"}
+                      : game.level === 7
+                        ? "◉"
+                        : game.level === 4
+                          ? "≋"
+                          : game.level === 3
+                            ? "≈"
+                            : "♱"}
                 </span>
                 <span>
                   {game.level === 5
                     ? "☄"
                     : game.level === 6
                       ? "◈"
-                      : game.level === 4
-                        ? "◒"
-                        : game.level === 3
-                          ? "◌"
-                          : "♱"}
+                      : game.level === 7
+                        ? "☀"
+                        : game.level === 4
+                          ? "◒"
+                          : game.level === 3
+                            ? "◌"
+                            : "♱"}
                 </span>
               </div>
 
@@ -1561,7 +1680,7 @@ export default function Home() {
             </h1>
             <p>
               {selectedMode === "gauntlet"
-                ? "从夕照前院出发，连续穿过月雾、潮汐、风暴与星陨战场，最终抵达镜像回廊。阳光、植物、生命与分数跨关保留，第六关结束后赢得远征。"
+                ? "从夕照前院出发，连续穿过月雾、潮汐、风暴、星陨与镜像战场，最终抵达蚀光天文台。阳光、植物、生命与分数跨关保留，第七关结束后赢得远征。"
                 : previewLevel.description}
             </p>
             <div className="mode-picker" role="radiogroup" aria-label="选择模式">
@@ -1581,7 +1700,7 @@ export default function Home() {
                 aria-checked={selectedMode === "gauntlet"}
               >
                 <small>连续远征</small>
-                <strong>六关连战 · 状态不重置</strong>
+                <strong>七关连战 · 状态不重置</strong>
               </button>
             </div>
             {selectedMode === "campaign" ? (
@@ -1650,6 +1769,16 @@ export default function Home() {
                   <strong>镜像回廊</strong>
                   <span>8 波 · 对称路线生成幽影</span>
                 </button>
+                <button
+                  className={`level-card eclipse ${selectedLevel === 7 ? "active" : ""}`}
+                  onClick={() => setSelectedLevel(7)}
+                  role="radio"
+                  aria-checked={selectedLevel === 7}
+                >
+                  <small>LEVEL 07</small>
+                  <strong>蚀光天文台</strong>
+                  <span>9 波 · 日蚀改变资源与战力</span>
+                </button>
               </div>
             ) : (
               <div className="gauntlet-route" aria-label="连续远征关卡路线">
@@ -1664,6 +1793,8 @@ export default function Home() {
                 <span>05 星陨</span>
                 <b>→</b>
                 <span>06 镜像</span>
+                <b>→</b>
+                <span>07 日蚀</span>
                 <b>🏆</b>
               </div>
             )}
@@ -1683,7 +1814,7 @@ export default function Home() {
               <span>🌿 选择卡片后种植</span>
               <span>
                 {selectedMode === "gauntlet"
-                  ? "🏆 六关连战后获得胜利"
+                  ? "🏆 七关连战后获得胜利"
                   : `🏁 击退全部 ${previewLevel.waves} 波`}
               </span>
             </div>
@@ -1718,7 +1849,7 @@ export default function Home() {
             <span className="eyebrow">
               {game.phase === "won"
                 ? game.mode === "gauntlet"
-                  ? "六座花园全部守住！"
+                  ? "七座花园全部守住！"
                   : "花园守住了！"
                 : game.mode === "gauntlet"
                   ? `连续远征止步第 ${game.journeyStage} 站`
@@ -1728,17 +1859,19 @@ export default function Home() {
               {game.phase === "won"
                 ? game.mode === "gauntlet"
                   ? "远征凯旋"
-                  : game.level === 6
-                    ? "镜影归寂"
-                    : game.level === 5
-                      ? "星火坠落"
-                      : game.level === 4
-                        ? "风暴止息"
-                        : game.level === 3
-                          ? "潮声退去"
-                          : game.level === 2
-                            ? "月雾退散"
-                            : "黎明到来"
+                  : game.level === 7
+                    ? "光明复归"
+                    : game.level === 6
+                      ? "镜影归寂"
+                      : game.level === 5
+                        ? "星火坠落"
+                        : game.level === 4
+                          ? "风暴止息"
+                          : game.level === 3
+                            ? "潮声退去"
+                            : game.level === 2
+                              ? "月雾退散"
+                              : "黎明到来"
                 : game.mode === "gauntlet"
                   ? "远征暂歇"
                   : "再试一次"}
@@ -1767,7 +1900,7 @@ export default function Home() {
             <div className="result-actions">
               {game.phase === "won" &&
                 game.mode === "campaign" &&
-                game.level < 6 && (
+                game.level < 7 && (
                 <button
                   className="primary-button compact"
                   onClick={() =>
