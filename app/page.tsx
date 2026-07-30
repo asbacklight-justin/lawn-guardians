@@ -12,8 +12,8 @@ type PlantKey =
   | "mooncap";
 type Tool = PlantKey | "shovel" | null;
 type Phase = "ready" | "playing" | "won" | "lost";
-type LevelId = 1 | 2 | 3;
-type GameMode = "campaign" | "endless";
+type LevelId = 1 | 2 | 3 | 4;
+type GameMode = "campaign" | "gauntlet";
 
 type Plant = {
   id: number;
@@ -51,7 +51,7 @@ type Tombstone = { id: number; row: number; col: number };
 type GameState = {
   level: LevelId;
   mode: GameMode;
-  endlessStage: number;
+  journeyStage: number;
   phase: Phase;
   paused: boolean;
   speed: 1 | 2;
@@ -75,6 +75,10 @@ type GameState = {
   tideRow: number | null;
   tideUntil: number;
   nextTideAt: number;
+  windDirection: -1 | 1;
+  lastWindDirection: -1 | 1;
+  nextWindAt: number;
+  windUntil: number;
   transitionText: string;
   transitionUntil: number;
 };
@@ -136,6 +140,18 @@ const LEVELS: Record<
     initialSun: 200,
     skySunBase: 6.2,
     skySunJitter: 1.4,
+    graves: [],
+  },
+  4: {
+    name: "风暴钟楼",
+    kicker: "第四关 · 风向突变",
+    description:
+      "钟楼阵风会定时把所有敌人卷向相邻路线，风向每次反转。均衡守住五路，击退六波最终攻势。",
+    waves: 6,
+    totalEnemies: 60,
+    initialSun: 225,
+    skySunBase: 6.5,
+    skySunJitter: 1.2,
     graves: [],
   },
 };
@@ -241,7 +257,7 @@ const freshGame = (
 ): GameState => ({
   level,
   mode,
-  endlessStage: 1,
+  journeyStage: 1,
   phase: "ready",
   paused: false,
   speed: 1,
@@ -277,22 +293,21 @@ const freshGame = (
   tideRow: null,
   tideUntil: 0,
   nextTideAt: 7,
+  windDirection: 1,
+  lastWindDirection: 1,
+  nextWindAt: 8,
+  windUntil: 0,
   transitionText: "",
   transitionUntil: 0,
 });
 
 function stageEnemyTotal(game: GameState) {
-  const extra =
-    game.mode === "endless"
-      ? Math.floor((game.endlessStage - 1) / 3) * 5
-      : 0;
-  return LEVELS[game.level].totalEnemies + extra;
+  return LEVELS[game.level].totalEnemies;
 }
 
 function spawnZombie(
   spawned: number,
   level: LevelId,
-  endlessStage: number,
 ): Zombie {
   const wave = Math.floor(spawned / 10) + 1;
   const roll = Math.random();
@@ -303,6 +318,12 @@ function spawnZombie(
         : roll < 0.52
           ? "pothead"
           : "ironhead"
+      : level === 4 && wave >= 4
+        ? roll < 0.08
+          ? "wanderer"
+          : roll < 0.42
+            ? "pothead"
+            : "ironhead"
       : level === 3 && wave >= 4
         ? roll < 0.12
           ? "wanderer"
@@ -329,9 +350,8 @@ function spawnZombie(
     pothead: { hp: 410, speed: 0.15, damage: 64 },
     ironhead: { hp: 720, speed: 0.115, damage: 72 },
   }[kind];
-  const levelMultiplier = level === 2 ? 1.08 : level === 3 ? 1.14 : 1;
-  const endlessMultiplier = 1 + Math.max(0, endlessStage - 1) * 0.06;
-  const multiplier = levelMultiplier * endlessMultiplier;
+  const multiplier =
+    level === 2 ? 1.08 : level === 3 ? 1.14 : level === 4 ? 1.2 : 1;
   return {
     id: uid(),
     kind,
@@ -372,6 +392,19 @@ function stepGame(previous: GameState, dt: number): GameState {
     g.nextTideAt = g.elapsed + 13;
   }
 
+  if (g.level === 4 && g.elapsed >= g.nextWindAt) {
+    const gust = g.windDirection;
+    for (const zombie of g.zombies) {
+      const shifted = zombie.row + gust;
+      zombie.row =
+        shifted < 0 || shifted >= ROWS ? zombie.row - gust : shifted;
+    }
+    g.lastWindDirection = gust;
+    g.windDirection = gust === 1 ? -1 : 1;
+    g.windUntil = g.elapsed + 2.2;
+    g.nextWindAt = g.elapsed + 14;
+  }
+
   if (g.elapsed >= g.nextSunAt) {
     g.suns.push({
       id: uid(),
@@ -387,23 +420,30 @@ function stepGame(previous: GameState, dt: number): GameState {
 
   const totalEnemies = stageEnemyTotal(g);
   if (g.spawned < totalEnemies && g.elapsed >= g.nextSpawnAt) {
-    g.zombies.push(spawnZombie(g.spawned, g.level, g.endlessStage));
+    g.zombies.push(spawnZombie(g.spawned, g.level));
     g.spawned += 1;
     const wave = Math.floor((g.spawned - 1) / 10) + 1;
     const minimumGap =
-      g.level === 3 ? 1.25 : g.level === 2 ? 1.45 : 1.7;
+      g.level === 4
+        ? 1.1
+        : g.level === 3
+          ? 1.25
+          : g.level === 2
+            ? 1.45
+            : 1.7;
     const baseGap =
-      g.level === 3 ? 3.85 : g.level === 2 ? 4.05 : 4.35;
-    const endlessPace =
-      g.mode === "endless"
-        ? Math.max(0.72, 1 - (g.endlessStage - 1) * 0.025)
-        : 1;
+      g.level === 4
+        ? 3.6
+        : g.level === 3
+          ? 3.85
+          : g.level === 2
+            ? 4.05
+            : 4.35;
     const gap = Math.max(
       minimumGap,
       baseGap - wave * 0.72,
     );
-    g.nextSpawnAt =
-      g.elapsed + gap * endlessPace * (0.78 + Math.random() * 0.48);
+    g.nextSpawnAt = g.elapsed + gap * (0.78 + Math.random() * 0.48);
   }
 
   for (const plant of g.plants) {
@@ -562,14 +602,14 @@ function stepGame(previous: GameState, dt: number): GameState {
   }
 
   if (g.spawned >= totalEnemies && g.zombies.length === 0) {
-    if (g.mode === "endless") {
-      const nextLevel = (g.level === 3 ? 1 : g.level + 1) as LevelId;
-      const nextStage = g.endlessStage + 1;
+    if (g.mode === "gauntlet" && g.level < 4) {
+      const nextLevel = (g.level + 1) as LevelId;
+      const nextStage = g.journeyStage + 1;
       const occupied = new Set(
         g.plants.map((plant) => `${plant.row}-${plant.col}`),
       );
       g.level = nextLevel;
-      g.endlessStage = nextStage;
+      g.journeyStage = nextStage;
       g.elapsed = 0;
       g.nextSpawnAt = 3.2;
       g.nextSunAt = 1.8;
@@ -585,14 +625,24 @@ function stepGame(previous: GameState, dt: number): GameState {
       g.tideRow = null;
       g.tideUntil = 0;
       g.nextTideAt = 7;
-      g.transitionText = `无尽第 ${nextStage} 站 · ${LEVELS[nextLevel].name}`;
+      g.windDirection = 1;
+      g.lastWindDirection = 1;
+      g.nextWindAt = 8;
+      g.windUntil = 0;
+      g.transitionText = `连续远征第 ${nextStage} 站 · ${LEVELS[nextLevel].name}`;
       g.transitionUntil = 3;
       g.score += 1800 + nextStage * 220;
     } else {
       g.phase = "won";
       g.paused = false;
       const levelBonus =
-        g.level === 3 ? 5200 : g.level === 2 ? 3800 : 2500;
+        g.level === 4
+          ? 6800
+          : g.level === 3
+            ? 5200
+            : g.level === 2
+              ? 3800
+              : 2500;
       g.score += Math.max(0, Math.round(levelBonus - g.elapsed * 12));
     }
   }
@@ -743,7 +793,7 @@ export default function Home() {
         const plant = PLANT_ORDER[Number(event.key) - 1];
         const mooncapUnlocked =
           game.level >= 2 ||
-          (game.mode === "endless" && game.endlessStage > 1);
+          (game.mode === "gauntlet" && game.journeyStage > 1);
         if (plant && (plant !== "mooncap" || mooncapUnlocked)) {
           setSelected(plant);
         }
@@ -759,7 +809,7 @@ export default function Home() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     collectAllSuns,
-    game.endlessStage,
+    game.journeyStage,
     game.level,
     game.mode,
     game.phase,
@@ -777,9 +827,10 @@ export default function Home() {
     game.level === 3 &&
     game.tideRow !== null &&
     game.elapsed < game.tideUntil;
+  const windActive = game.level === 4 && game.elapsed < game.windUntil;
   const mooncapUnlocked =
     game.level >= 2 ||
-    (game.mode === "endless" && game.endlessStage > 1);
+    (game.mode === "gauntlet" && game.journeyStage > 1);
   const selectedPlant = selected && selected !== "shovel" ? PLANTS[selected] : null;
 
   const startGame = (
@@ -789,7 +840,7 @@ export default function Home() {
     collectionTimers.current.forEach((timer) => window.clearTimeout(timer));
     collectionTimers.current = [];
     setBestScore((current) => Math.max(current, game.score));
-    const startingLevel = mode === "endless" ? 1 : levelId;
+    const startingLevel = mode === "gauntlet" ? 1 : levelId;
     const next = freshGame(startingLevel, mode);
     next.phase = "playing";
     setGame(next);
@@ -797,13 +848,15 @@ export default function Home() {
     setSelectedMode(mode);
     setSelected(null);
     const startToast =
-      mode === "endless"
-        ? "无尽远征开始：阳光与植物将跨关保留"
-        : startingLevel === 3
-          ? "潮线启动，留意即将休眠的路线……"
-          : startingLevel === 2
-            ? "月雾升起，第一波正在靠近……"
-            : "第一波正在靠近……";
+      mode === "gauntlet"
+        ? "连续远征开始：四关连战，阳光与植物跨关保留"
+        : startingLevel === 4
+          ? "钟声响起，第一阵风即将改变敌人路线……"
+          : startingLevel === 3
+            ? "潮线启动，留意即将休眠的路线……"
+            : startingLevel === 2
+              ? "月雾升起，第一波正在靠近……"
+              : "第一波正在靠近……";
     setToast(startToast);
     tone(440, 0.12);
     window.setTimeout(() => tone(660, 0.16), 90);
@@ -935,13 +988,13 @@ export default function Home() {
     );
   });
   const previewLevel =
-    selectedMode === "endless" ? LEVELS[1] : LEVELS[selectedLevel];
+    selectedMode === "gauntlet" ? LEVELS[1] : LEVELS[selectedLevel];
 
   return (
     <main
       className={`game-shell level-${
         game.phase === "ready"
-          ? selectedMode === "endless"
+          ? selectedMode === "gauntlet"
             ? 1
             : selectedLevel
           : game.level
@@ -958,13 +1011,13 @@ export default function Home() {
         <div className="wave-meter" aria-label={`第 ${wave} 波`}>
           <div className="wave-copy">
             <span>
-              {game.mode === "endless"
-                ? `无尽第 ${game.endlessStage} 站 · `
+              {game.mode === "gauntlet"
+                ? `远征第 ${game.journeyStage} 站 · `
                 : ""}
               {level.name} · 第 {wave} 波 / {totalWaves}
             </span>
             <span>
-              {game.mode === "endless" ? game.totalKills : game.kills} 击退
+              {game.mode === "gauntlet" ? game.totalKills : game.kills} 击退
             </span>
           </div>
           <div className="meter-track">
@@ -1060,6 +1113,8 @@ export default function Home() {
                   ? "night-stage"
                   : game.level === 3
                     ? "tide-stage"
+                    : game.level === 4
+                      ? "wind-stage"
                     : ""
               }`}
             >
@@ -1094,6 +1149,23 @@ export default function Home() {
                   aria-label={`第 ${game.tideRow! + 1} 行潮水涌入，敌人减速，植物休眠`}
                 >
                   <span>≈ 潮水：敌人减速 · 植物休眠 ≈</span>
+                </div>
+              )}
+
+              {windActive && (
+                <div
+                  className={`wind-sweep ${
+                    game.lastWindDirection === 1 ? "wind-down" : "wind-up"
+                  }`}
+                  role="status"
+                  aria-label={`阵风将敌人卷向${
+                    game.lastWindDirection === 1 ? "下方" : "上方"
+                  }相邻路线`}
+                >
+                  <span>
+                    {game.lastWindDirection === 1 ? "↓↓↓" : "↑↑↑"} 阵风换线{" "}
+                    {game.lastWindDirection === 1 ? "↓↓↓" : "↑↑↑"}
+                  </span>
                 </div>
               )}
 
@@ -1142,7 +1214,7 @@ export default function Home() {
                     tideActive && zombie.row === game.tideRow
                       ? "tide-slowed"
                       : ""
-                  }`}
+                  } ${windActive ? "wind-tossed" : ""}`}
                   style={{
                     left: `${(zombie.x / COLS) * 100}%`,
                     top: `${((zombie.row + 0.5) / ROWS) * 100}%`,
@@ -1196,11 +1268,15 @@ export default function Home() {
               ))}
 
               <div className="right-fog" aria-hidden="true">
-                <span>{game.level === 3 ? "≈" : "♱"}</span>
-                <span>{game.level === 3 ? "◌" : "♱"}</span>
+                <span>
+                  {game.level === 4 ? "≋" : game.level === 3 ? "≈" : "♱"}
+                </span>
+                <span>
+                  {game.level === 4 ? "◒" : game.level === 3 ? "◌" : "♱"}
+                </span>
               </div>
 
-              {game.mode === "endless" &&
+              {game.mode === "gauntlet" &&
                 game.transitionText &&
                 game.elapsed < game.transitionUntil && (
                   <div className="stage-transition" role="status">
@@ -1222,7 +1298,9 @@ export default function Home() {
               : `按 1–${mooncapUnlocked ? "7" : "6"} 选植物 · A 自动收集阳光 · 空格暂停`}
         </span>
         <span>
-          {game.mode === "endless" ? `无尽第 ${game.endlessStage} 站 · ` : ""}
+          {game.mode === "gauntlet"
+            ? `连续远征第 ${game.journeyStage} 站 · `
+            : ""}
           最高分 {Math.max(bestScore, game.score)}
         </span>
       </footer>
@@ -1241,8 +1319,8 @@ export default function Home() {
               守卫战
             </h1>
             <p>
-              {selectedMode === "endless"
-                ? "从夕照前院出发，无缝穿过月雾墓园与潮汐玻璃屋。阳光、植物、生命与分数跨关保留，敌人每轮都会更强。"
+              {selectedMode === "gauntlet"
+                ? "从夕照前院出发，无缝穿过月雾墓园、潮汐玻璃屋与风暴钟楼。阳光、植物、生命与分数跨关保留，第四关结束后赢得远征。"
                 : previewLevel.description}
             </p>
             <div className="mode-picker" role="radiogroup" aria-label="选择模式">
@@ -1256,13 +1334,13 @@ export default function Home() {
                 <strong>自由选择战场</strong>
               </button>
               <button
-                className={`endless ${selectedMode === "endless" ? "active" : ""}`}
-                onClick={() => setSelectedMode("endless")}
+                className={`gauntlet ${selectedMode === "gauntlet" ? "active" : ""}`}
+                onClick={() => setSelectedMode("gauntlet")}
                 role="radio"
-                aria-checked={selectedMode === "endless"}
+                aria-checked={selectedMode === "gauntlet"}
               >
-                <small>无尽模式</small>
-                <strong>植物与阳光不重置 ∞</strong>
+                <small>连续远征</small>
+                <strong>四关连战 · 状态不重置</strong>
               </button>
             </div>
             {selectedMode === "campaign" ? (
@@ -1301,15 +1379,27 @@ export default function Home() {
                   <strong>潮汐玻璃屋</strong>
                   <span>5 波 · 路线轮流休眠</span>
                 </button>
+                <button
+                  className={`level-card wind ${selectedLevel === 4 ? "active" : ""}`}
+                  onClick={() => setSelectedLevel(4)}
+                  role="radio"
+                  aria-checked={selectedLevel === 4}
+                >
+                  <small>LEVEL 04</small>
+                  <strong>风暴钟楼</strong>
+                  <span>6 波 · 阵风迫使敌人换线</span>
+                </button>
               </div>
             ) : (
-              <div className="endless-route" aria-label="无尽模式关卡路线">
+              <div className="gauntlet-route" aria-label="连续远征关卡路线">
                 <span>01 夕照</span>
                 <b>→</b>
                 <span>02 月雾</span>
                 <b>→</b>
                 <span>03 潮汐</span>
-                <b>↻</b>
+                <b>→</b>
+                <span>04 风暴</span>
+                <b>🏆</b>
               </div>
             )}
             <button
@@ -1317,8 +1407,8 @@ export default function Home() {
               onClick={() => startGame(selectedLevel, selectedMode)}
             >
               <span>
-                {selectedMode === "endless"
-                  ? "开始无尽远征"
+                {selectedMode === "gauntlet"
+                  ? "开始连续远征"
                   : `开始 ${previewLevel.name}`}
               </span>
               <b>▶</b>
@@ -1327,8 +1417,8 @@ export default function Home() {
               <span>☀ 按 A 自动收集阳光</span>
               <span>🌿 选择卡片后种植</span>
               <span>
-                {selectedMode === "endless"
-                  ? "∞ 跨关保留阳光与植物"
+                {selectedMode === "gauntlet"
+                  ? "🏆 四关连战后获得胜利"
                   : `🏁 击退全部 ${previewLevel.waves} 波`}
               </span>
             </div>
@@ -1362,19 +1452,25 @@ export default function Home() {
             </span>
             <span className="eyebrow">
               {game.phase === "won"
-                ? "花园守住了！"
-                : game.mode === "endless"
-                  ? `无尽远征止步第 ${game.endlessStage} 站`
+                ? game.mode === "gauntlet"
+                  ? "四座花园全部守住！"
+                  : "花园守住了！"
+                : game.mode === "gauntlet"
+                  ? `连续远征止步第 ${game.journeyStage} 站`
                   : "防线被突破"}
             </span>
             <h2>
               {game.phase === "won"
-                ? game.level === 3
-                  ? "潮声退去"
-                  : game.level === 2
-                    ? "月雾退散"
-                    : "黎明到来"
-                : game.mode === "endless"
+                ? game.mode === "gauntlet"
+                  ? "远征凯旋"
+                  : game.level === 4
+                    ? "风暴止息"
+                    : game.level === 3
+                      ? "潮声退去"
+                      : game.level === 2
+                        ? "月雾退散"
+                        : "黎明到来"
+                : game.mode === "gauntlet"
                   ? "远征暂歇"
                   : "再试一次"}
             </h2>
@@ -1385,14 +1481,14 @@ export default function Home() {
               </div>
               <div>
                 <strong>
-                  {game.mode === "endless" ? game.totalKills : game.kills}
+                  {game.mode === "gauntlet" ? game.totalKills : game.kills}
                 </strong>
                 <small>击退敌人</small>
               </div>
               <div>
                 <strong>
                   {Math.floor(
-                    game.mode === "endless" ? game.runElapsed : game.elapsed,
+                    game.mode === "gauntlet" ? game.runElapsed : game.elapsed,
                   )}
                   s
                 </strong>
@@ -1400,7 +1496,9 @@ export default function Home() {
               </div>
             </div>
             <div className="result-actions">
-              {game.phase === "won" && game.level < 3 && (
+              {game.phase === "won" &&
+                game.mode === "campaign" &&
+                game.level < 4 && (
                 <button
                   className="primary-button compact"
                   onClick={() =>
@@ -1412,17 +1510,17 @@ export default function Home() {
               )}
               <button
                 className={
-                  game.mode === "endless"
+                  game.mode === "gauntlet"
                     ? "primary-button compact"
                     : "secondary-button"
                 }
                 onClick={() =>
-                  game.mode === "endless"
-                    ? startGame(1, "endless")
+                  game.mode === "gauntlet"
+                    ? startGame(1, "gauntlet")
                     : startGame(game.level, "campaign")
                 }
               >
-                {game.mode === "endless" ? "重新远征" : "重玩本关"}
+                {game.mode === "gauntlet" ? "重新远征" : "重玩本关"}
               </button>
             </div>
           </div>

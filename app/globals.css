@@ -572,6 +572,28 @@ button:focus-visible {
   background: linear-gradient(90deg, transparent, #0b5967bd);
 }
 
+.wind-stage {
+  background:
+    linear-gradient(90deg, transparent 86%, #4a3e645e),
+    repeating-linear-gradient(0deg, #9b9a79 0 10%, #838a6c 10% 20%);
+}
+
+.wind-stage::before {
+  background:
+    radial-gradient(ellipse at 24% 18%, #fff8cf55 0 5%, transparent 22%),
+    repeating-linear-gradient(155deg, transparent 0 50px, #e8eddb24 54px 57px, transparent 61px 100px),
+    repeating-linear-gradient(90deg, transparent 0 11%, #413d5038 11% 11.25%);
+}
+
+.level-4 .house-zone {
+  filter: saturate(0.52) brightness(0.78) hue-rotate(205deg);
+}
+
+.level-4 .right-fog {
+  width: 19%;
+  background: linear-gradient(90deg, transparent, #443d5dca);
+}
+
 .lawn-grid {
   position: absolute;
   inset: 0;
@@ -632,6 +654,43 @@ button:focus-visible {
 
 .zombie-unit.tide-slowed {
   filter: hue-rotate(135deg) saturate(0.72) brightness(1.04);
+}
+
+.wind-sweep {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    repeating-linear-gradient(165deg, transparent 0 38px, #fff9d63c 40px 43px, transparent 46px 76px);
+  pointer-events: none;
+  animation: windflash 2.2s ease-out both;
+}
+
+.wind-sweep.wind-up {
+  transform: scaleY(-1);
+}
+
+.wind-sweep span {
+  padding: 7px 16px;
+  border: 2px solid #fff2b7a3;
+  border-radius: 999px;
+  background: #302d45d9;
+  color: #fff2b7;
+  font-size: 16px;
+  font-weight: 950;
+  letter-spacing: 0.18em;
+  box-shadow: 0 8px 24px #1a152aaa;
+}
+
+.wind-sweep.wind-up span {
+  transform: scaleY(-1);
+}
+
+.zombie-unit.wind-tossed {
+  animation: windtoss 0.38s ease-in-out infinite alternate;
 }
 
 .lawn-cell {
@@ -1137,7 +1196,7 @@ button:focus-visible {
   box-shadow: 0 0 0 2px #ffd34b47;
 }
 
-.mode-picker button.endless.active {
+.mode-picker button.gauntlet.active {
   border-color: #8ff5e6;
   background: #174a4adf;
   box-shadow: 0 0 0 2px #65ead147;
@@ -1205,6 +1264,14 @@ button:focus-visible {
     0 0 0 2px #54e6d647;
 }
 
+.level-card.wind.active {
+  border-color: #ffe4a6;
+  background: #4b405de8;
+  box-shadow:
+    inset 0 1px 0 #ffffff36,
+    0 0 0 2px #d9c0ff47;
+}
+
 .level-card small {
   color: #d8c56f;
   font-size: 8px;
@@ -1221,7 +1288,7 @@ button:focus-visible {
   font-size: 9px;
 }
 
-.endless-route {
+.gauntlet-route {
   width: min(600px, 100%);
   margin: 0 0 16px;
   padding: 12px 14px;
@@ -1238,7 +1305,7 @@ button:focus-visible {
   font-weight: 900;
 }
 
-.endless-route b {
+.gauntlet-route b {
   color: #ffe57b;
   font-size: 17px;
 }
@@ -1496,6 +1563,32 @@ button:focus-visible {
   }
 }
 
+@keyframes windflash {
+  from {
+    opacity: 0;
+    background-position: -180px 0;
+  }
+  18%,
+  70% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    background-position: 220px 0;
+  }
+}
+
+@keyframes windtoss {
+  from {
+    margin-top: -5px;
+    transform: translate(-50%, -50%) rotate(-7deg);
+  }
+  to {
+    margin-top: 5px;
+    transform: translate(-50%, -50%) rotate(7deg);
+  }
+}
+
 @media (max-width: 900px) {
   .game-shell {
     padding-inline: 7px;
@@ -1601,6 +1694,7 @@ button:focus-visible {
 
   .level-picker {
     margin-bottom: 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .level-card {
