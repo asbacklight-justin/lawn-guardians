@@ -36,8 +36,9 @@ test("server-renders the Lawn Guardians game shell", async () => {
   assert.match(html, /月雾墓园/);
   assert.match(html, /潮汐玻璃屋/);
   assert.match(html, /风暴钟楼/);
+  assert.match(html, /星陨天台/);
   assert.match(html, /连续远征/);
-  assert.match(html, /四关连战 · 状态不重置/);
+  assert.match(html, /五关连战 · 状态不重置/);
   assert.match(html, /月芒菇/);
   assert.match(html, /自动收集场上全部阳光/);
   assert.match(html, /og\.png/);

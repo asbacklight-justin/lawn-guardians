@@ -594,6 +594,29 @@ button:focus-visible {
   background: linear-gradient(90deg, transparent, #443d5dca);
 }
 
+.meteor-stage {
+  background:
+    linear-gradient(90deg, transparent 84%, #321b405e),
+    repeating-linear-gradient(0deg, #74566a 0 10%, #5f465d 10% 20%);
+}
+
+.meteor-stage::before {
+  background:
+    radial-gradient(circle at 78% 12%, #ffb27a42 0 3%, transparent 19%),
+    radial-gradient(circle at 24% 68%, #d985ff2b 0 4%, transparent 25%),
+    repeating-linear-gradient(135deg, transparent 0 70px, #ffb09b17 72px 74px, transparent 77px 130px),
+    repeating-linear-gradient(90deg, transparent 0 11%, #3b203c48 11% 11.25%);
+}
+
+.level-5 .house-zone {
+  filter: saturate(0.72) brightness(0.68) hue-rotate(255deg);
+}
+
+.level-5 .right-fog {
+  width: 21%;
+  background: linear-gradient(90deg, transparent, #2f153fcf);
+}
+
 .lawn-grid {
   position: absolute;
   inset: 0;
@@ -691,6 +714,79 @@ button:focus-visible {
 
 .zombie-unit.wind-tossed {
   animation: windtoss 0.38s ease-in-out infinite alternate;
+}
+
+.lawn-cell.meteor-danger-cell,
+.lawn-cell.meteor-danger-cell:hover {
+  background: #ff4f4f35;
+  box-shadow:
+    inset 0 0 0 2px #ff817aa3,
+    inset 0 0 22px #ff2f2f55;
+}
+
+.meteor-warning,
+.meteor-impact {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.meteor-warning {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  border-right: 2px solid #ff9c8caa;
+  border-left: 2px solid #ff9c8caa;
+  background:
+    repeating-linear-gradient(135deg, transparent 0 16px, #ffdaaa2d 18px 21px, transparent 23px 38px),
+    linear-gradient(#ff6d6442, #b5123655);
+  box-shadow:
+    inset 0 0 35px #ff433f52,
+    0 0 18px #ff4c6285;
+  animation: meteorwarn 0.8s ease-in-out infinite alternate;
+}
+
+.meteor-warning strong {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 3px solid #fff1cc;
+  border-radius: 50%;
+  background: #841d32e8;
+  color: #fff6d9;
+  font-size: 21px;
+  box-shadow: 0 0 24px #ff9c7b;
+}
+
+.meteor-warning span {
+  margin-top: 7px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #5e1629dc;
+  color: #ffe8c5;
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  writing-mode: vertical-rl;
+}
+
+.meteor-impact {
+  z-index: 14;
+  background:
+    radial-gradient(ellipse at 50% 58%, #fff 0 5%, #ffe081 12%, #ff632db8 34%, transparent 70%),
+    linear-gradient(90deg, transparent, #fff5d4c7 48% 52%, transparent);
+  box-shadow:
+    0 0 55px #ff6b3d,
+    inset 0 0 30px #fff2ba;
+  animation: meteorimpact 0.9s ease-out both;
+}
+
+.plant-unit.meteor-marked {
+  filter: sepia(0.5) saturate(1.8) hue-rotate(315deg);
+  animation: dangerpulse 0.45s ease-in-out infinite alternate;
 }
 
 .lawn-cell {
@@ -1272,6 +1368,14 @@ button:focus-visible {
     0 0 0 2px #d9c0ff47;
 }
 
+.level-card.meteor.active {
+  border-color: #ffb39f;
+  background: #5c2c45e8;
+  box-shadow:
+    inset 0 1px 0 #ffffff36,
+    0 0 0 2px #ff779147;
+}
+
 .level-card small {
   color: #d8c56f;
   font-size: 8px;
@@ -1586,6 +1690,41 @@ button:focus-visible {
   to {
     margin-top: 5px;
     transform: translate(-50%, -50%) rotate(7deg);
+  }
+}
+
+@keyframes meteorwarn {
+  from {
+    filter: brightness(0.85);
+    opacity: 0.68;
+  }
+  to {
+    filter: brightness(1.18);
+    opacity: 1;
+  }
+}
+
+@keyframes meteorimpact {
+  from {
+    transform: scaleY(0.15);
+    opacity: 0;
+  }
+  18% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+  to {
+    transform: scaleY(1.08);
+    opacity: 0;
+  }
+}
+
+@keyframes dangerpulse {
+  from {
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1.06);
   }
 }
 

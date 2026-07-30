@@ -12,7 +12,7 @@ type PlantKey =
   | "mooncap";
 type Tool = PlantKey | "shovel" | null;
 type Phase = "ready" | "playing" | "won" | "lost";
-type LevelId = 1 | 2 | 3 | 4;
+type LevelId = 1 | 2 | 3 | 4 | 5;
 type GameMode = "campaign" | "gauntlet";
 
 type Plant = {
@@ -79,6 +79,11 @@ type GameState = {
   lastWindDirection: -1 | 1;
   nextWindAt: number;
   windUntil: number;
+  meteorColumn: number | null;
+  meteorCursor: number;
+  meteorStrikeAt: number;
+  nextMeteorAt: number;
+  meteorFlashUntil: number;
   transitionText: string;
   transitionUntil: number;
 };
@@ -152,6 +157,18 @@ const LEVELS: Record<
     initialSun: 225,
     skySunBase: 6.5,
     skySunJitter: 1.2,
+    graves: [],
+  },
+  5: {
+    name: "星陨天台",
+    kicker: "第五关 · 终章天灾",
+    description:
+      "红色轨道会提前四秒锁定整列，随后陨星同时重创植物与敌人。借天灾清场，守住七波终章攻势。",
+    waves: 7,
+    totalEnemies: 70,
+    initialSun: 250,
+    skySunBase: 7.1,
+    skySunJitter: 1.3,
     graves: [],
   },
 };
@@ -297,6 +314,11 @@ const freshGame = (
   lastWindDirection: 1,
   nextWindAt: 8,
   windUntil: 0,
+  meteorColumn: null,
+  meteorCursor: 2,
+  meteorStrikeAt: 0,
+  nextMeteorAt: 6,
+  meteorFlashUntil: 0,
   transitionText: "",
   transitionUntil: 0,
 });
@@ -318,6 +340,12 @@ function spawnZombie(
         : roll < 0.52
           ? "pothead"
           : "ironhead"
+      : level === 5 && wave >= 4
+        ? roll < 0.05
+          ? "wanderer"
+          : roll < 0.36
+            ? "pothead"
+            : "ironhead"
       : level === 4 && wave >= 4
         ? roll < 0.08
           ? "wanderer"
@@ -351,7 +379,15 @@ function spawnZombie(
     ironhead: { hp: 720, speed: 0.115, damage: 72 },
   }[kind];
   const multiplier =
-    level === 2 ? 1.08 : level === 3 ? 1.14 : level === 4 ? 1.2 : 1;
+    level === 2
+      ? 1.08
+      : level === 3
+        ? 1.14
+        : level === 4
+          ? 1.2
+          : level === 5
+            ? 1.28
+            : 1;
   return {
     id: uid(),
     kind,
@@ -405,6 +441,41 @@ function stepGame(previous: GameState, dt: number): GameState {
     g.nextWindAt = g.elapsed + 14;
   }
 
+  if (
+    g.level === 5 &&
+    g.meteorColumn === null &&
+    g.elapsed >= g.nextMeteorAt
+  ) {
+    g.meteorColumn = g.meteorCursor;
+    g.meteorStrikeAt = g.elapsed + 4;
+  } else if (
+    g.level === 5 &&
+    g.meteorColumn !== null &&
+    g.elapsed >= g.meteorStrikeAt
+  ) {
+    const strikeColumn = g.meteorColumn;
+    for (const plant of g.plants) {
+      if (plant.col === strikeColumn) plant.hp -= 180;
+    }
+    for (const zombie of g.zombies) {
+      if (Math.abs(zombie.x - (strikeColumn + 0.5)) <= 0.72) {
+        zombie.hp -= 280;
+      }
+    }
+    for (let row = 0; row < ROWS; row++) {
+      g.bursts.push({
+        id: uid(),
+        row,
+        x: strikeColumn + 0.5,
+        ttl: 0.9,
+      });
+    }
+    g.meteorCursor = (strikeColumn + 4) % COLS;
+    g.meteorColumn = null;
+    g.meteorFlashUntil = g.elapsed + 0.9;
+    g.nextMeteorAt = g.elapsed + 14;
+  }
+
   if (g.elapsed >= g.nextSunAt) {
     g.suns.push({
       id: uid(),
@@ -424,21 +495,25 @@ function stepGame(previous: GameState, dt: number): GameState {
     g.spawned += 1;
     const wave = Math.floor((g.spawned - 1) / 10) + 1;
     const minimumGap =
-      g.level === 4
-        ? 1.1
-        : g.level === 3
-          ? 1.25
-          : g.level === 2
-            ? 1.45
-            : 1.7;
+      g.level === 5
+        ? 0.95
+        : g.level === 4
+          ? 1.1
+          : g.level === 3
+            ? 1.25
+            : g.level === 2
+              ? 1.45
+              : 1.7;
     const baseGap =
-      g.level === 4
-        ? 3.6
-        : g.level === 3
-          ? 3.85
-          : g.level === 2
-            ? 4.05
-            : 4.35;
+      g.level === 5
+        ? 3.4
+        : g.level === 4
+          ? 3.6
+          : g.level === 3
+            ? 3.85
+            : g.level === 2
+              ? 4.05
+              : 4.35;
     const gap = Math.max(
       minimumGap,
       baseGap - wave * 0.72,
@@ -447,6 +522,7 @@ function stepGame(previous: GameState, dt: number): GameState {
   }
 
   for (const plant of g.plants) {
+    if (plant.hp <= 0) continue;
     const dormantByTide =
       g.level === 3 &&
       g.tideRow === plant.row &&
@@ -602,7 +678,7 @@ function stepGame(previous: GameState, dt: number): GameState {
   }
 
   if (g.spawned >= totalEnemies && g.zombies.length === 0) {
-    if (g.mode === "gauntlet" && g.level < 4) {
+    if (g.mode === "gauntlet" && g.level < 5) {
       const nextLevel = (g.level + 1) as LevelId;
       const nextStage = g.journeyStage + 1;
       const occupied = new Set(
@@ -629,6 +705,11 @@ function stepGame(previous: GameState, dt: number): GameState {
       g.lastWindDirection = 1;
       g.nextWindAt = 8;
       g.windUntil = 0;
+      g.meteorColumn = null;
+      g.meteorCursor = 2;
+      g.meteorStrikeAt = 0;
+      g.nextMeteorAt = 6;
+      g.meteorFlashUntil = 0;
       g.transitionText = `连续远征第 ${nextStage} 站 · ${LEVELS[nextLevel].name}`;
       g.transitionUntil = 3;
       g.score += 1800 + nextStage * 220;
@@ -636,13 +717,15 @@ function stepGame(previous: GameState, dt: number): GameState {
       g.phase = "won";
       g.paused = false;
       const levelBonus =
-        g.level === 4
-          ? 6800
-          : g.level === 3
-            ? 5200
-            : g.level === 2
-              ? 3800
-              : 2500;
+        g.level === 5
+          ? 8800
+          : g.level === 4
+            ? 6800
+            : g.level === 3
+              ? 5200
+              : g.level === 2
+                ? 3800
+                : 2500;
       g.score += Math.max(0, Math.round(levelBonus - g.elapsed * 12));
     }
   }
@@ -828,6 +911,10 @@ export default function Home() {
     game.tideRow !== null &&
     game.elapsed < game.tideUntil;
   const windActive = game.level === 4 && game.elapsed < game.windUntil;
+  const meteorWarning =
+    game.level === 5 && game.meteorColumn !== null;
+  const meteorFlash =
+    game.level === 5 && game.elapsed < game.meteorFlashUntil;
   const mooncapUnlocked =
     game.level >= 2 ||
     (game.mode === "gauntlet" && game.journeyStage > 1);
@@ -849,14 +936,16 @@ export default function Home() {
     setSelected(null);
     const startToast =
       mode === "gauntlet"
-        ? "连续远征开始：四关连战，阳光与植物跨关保留"
-        : startingLevel === 4
-          ? "钟声响起，第一阵风即将改变敌人路线……"
-          : startingLevel === 3
-            ? "潮线启动，留意即将休眠的路线……"
-            : startingLevel === 2
-              ? "月雾升起，第一波正在靠近……"
-              : "第一波正在靠近……";
+        ? "连续远征开始：五关连战，阳光与植物跨关保留"
+        : startingLevel === 5
+          ? "星轨正在校准，红色警戒列即将出现……"
+          : startingLevel === 4
+            ? "钟声响起，第一阵风即将改变敌人路线……"
+            : startingLevel === 3
+              ? "潮线启动，留意即将休眠的路线……"
+              : startingLevel === 2
+                ? "月雾升起，第一波正在靠近……"
+                : "第一波正在靠近……";
     setToast(startToast);
     tone(440, 0.12);
     window.setTimeout(() => tone(660, 0.16), 90);
@@ -1115,6 +1204,8 @@ export default function Home() {
                     ? "tide-stage"
                     : game.level === 4
                       ? "wind-stage"
+                      : game.level === 5
+                        ? "meteor-stage"
                     : ""
               }`}
             >
@@ -1129,7 +1220,13 @@ export default function Home() {
                   return (
                     <button
                       key={`${row}-${col}`}
-                      className={`lawn-cell ${selectedPlant ? "plantable" : ""} ${isBlocked ? "tombstone-cell" : ""}`}
+                      className={`lawn-cell ${selectedPlant ? "plantable" : ""} ${
+                        isBlocked ? "tombstone-cell" : ""
+                      } ${
+                        meteorWarning && col === game.meteorColumn
+                          ? "meteor-danger-cell"
+                          : ""
+                      }`}
                       onClick={() => placeAt(row, col)}
                       aria-label={
                         isBlocked
@@ -1169,6 +1266,37 @@ export default function Home() {
                 </div>
               )}
 
+              {meteorWarning && (
+                <div
+                  className="meteor-warning"
+                  style={{
+                    left: `${(game.meteorColumn! / COLS) * 100}%`,
+                    width: `${100 / COLS}%`,
+                  }}
+                  role="status"
+                  aria-label={`第 ${game.meteorColumn! + 1} 列将在 ${Math.max(
+                    1,
+                    Math.ceil(game.meteorStrikeAt - game.elapsed),
+                  )} 秒后遭受陨星轰击`}
+                >
+                  <strong>
+                    {Math.max(1, Math.ceil(game.meteorStrikeAt - game.elapsed))}
+                  </strong>
+                  <span>陨星锁定</span>
+                </div>
+              )}
+
+              {meteorFlash && (
+                <div
+                  className="meteor-impact"
+                  style={{
+                    left: `${(((game.meteorCursor + COLS - 4) % COLS) / COLS) * 100}%`,
+                    width: `${100 / COLS}%`,
+                  }}
+                  aria-hidden="true"
+                />
+              )}
+
               {game.tombstones.map((tombstone) => (
                 <span
                   key={tombstone.id}
@@ -1189,6 +1317,10 @@ export default function Home() {
                   className={`plant-unit ${
                     tideActive && plant.row === game.tideRow
                       ? "tide-dormant"
+                      : ""
+                  } ${
+                    meteorWarning && plant.col === game.meteorColumn
+                      ? "meteor-marked"
                       : ""
                   }`}
                   style={{
@@ -1269,10 +1401,22 @@ export default function Home() {
 
               <div className="right-fog" aria-hidden="true">
                 <span>
-                  {game.level === 4 ? "≋" : game.level === 3 ? "≈" : "♱"}
+                  {game.level === 5
+                    ? "✦"
+                    : game.level === 4
+                      ? "≋"
+                      : game.level === 3
+                        ? "≈"
+                        : "♱"}
                 </span>
                 <span>
-                  {game.level === 4 ? "◒" : game.level === 3 ? "◌" : "♱"}
+                  {game.level === 5
+                    ? "☄"
+                    : game.level === 4
+                      ? "◒"
+                      : game.level === 3
+                        ? "◌"
+                        : "♱"}
                 </span>
               </div>
 
@@ -1320,7 +1464,7 @@ export default function Home() {
             </h1>
             <p>
               {selectedMode === "gauntlet"
-                ? "从夕照前院出发，无缝穿过月雾墓园、潮汐玻璃屋与风暴钟楼。阳光、植物、生命与分数跨关保留，第四关结束后赢得远征。"
+                ? "从夕照前院出发，无缝穿过月雾墓园、潮汐玻璃屋、风暴钟楼与星陨天台。阳光、植物、生命与分数跨关保留，第五关结束后赢得远征。"
                 : previewLevel.description}
             </p>
             <div className="mode-picker" role="radiogroup" aria-label="选择模式">
@@ -1340,7 +1484,7 @@ export default function Home() {
                 aria-checked={selectedMode === "gauntlet"}
               >
                 <small>连续远征</small>
-                <strong>四关连战 · 状态不重置</strong>
+                <strong>五关连战 · 状态不重置</strong>
               </button>
             </div>
             {selectedMode === "campaign" ? (
@@ -1389,6 +1533,16 @@ export default function Home() {
                   <strong>风暴钟楼</strong>
                   <span>6 波 · 阵风迫使敌人换线</span>
                 </button>
+                <button
+                  className={`level-card meteor ${selectedLevel === 5 ? "active" : ""}`}
+                  onClick={() => setSelectedLevel(5)}
+                  role="radio"
+                  aria-checked={selectedLevel === 5}
+                >
+                  <small>LEVEL 05</small>
+                  <strong>星陨天台</strong>
+                  <span>7 波 · 预警列双向伤害</span>
+                </button>
               </div>
             ) : (
               <div className="gauntlet-route" aria-label="连续远征关卡路线">
@@ -1399,6 +1553,8 @@ export default function Home() {
                 <span>03 潮汐</span>
                 <b>→</b>
                 <span>04 风暴</span>
+                <b>→</b>
+                <span>05 星陨</span>
                 <b>🏆</b>
               </div>
             )}
@@ -1418,7 +1574,7 @@ export default function Home() {
               <span>🌿 选择卡片后种植</span>
               <span>
                 {selectedMode === "gauntlet"
-                  ? "🏆 四关连战后获得胜利"
+                  ? "🏆 五关连战后获得胜利"
                   : `🏁 击退全部 ${previewLevel.waves} 波`}
               </span>
             </div>
@@ -1453,7 +1609,7 @@ export default function Home() {
             <span className="eyebrow">
               {game.phase === "won"
                 ? game.mode === "gauntlet"
-                  ? "四座花园全部守住！"
+                  ? "五座花园全部守住！"
                   : "花园守住了！"
                 : game.mode === "gauntlet"
                   ? `连续远征止步第 ${game.journeyStage} 站`
@@ -1463,13 +1619,15 @@ export default function Home() {
               {game.phase === "won"
                 ? game.mode === "gauntlet"
                   ? "远征凯旋"
-                  : game.level === 4
-                    ? "风暴止息"
-                    : game.level === 3
-                      ? "潮声退去"
-                      : game.level === 2
-                        ? "月雾退散"
-                        : "黎明到来"
+                  : game.level === 5
+                    ? "星火坠落"
+                    : game.level === 4
+                      ? "风暴止息"
+                      : game.level === 3
+                        ? "潮声退去"
+                        : game.level === 2
+                          ? "月雾退散"
+                          : "黎明到来"
                 : game.mode === "gauntlet"
                   ? "远征暂歇"
                   : "再试一次"}
@@ -1498,7 +1656,7 @@ export default function Home() {
             <div className="result-actions">
               {game.phase === "won" &&
                 game.mode === "campaign" &&
-                game.level < 4 && (
+                game.level < 5 && (
                 <button
                   className="primary-button compact"
                   onClick={() =>
